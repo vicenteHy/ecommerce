@@ -9,6 +9,54 @@ export interface PageViews { page: string; views: number; }
 export interface TimeOnPage { page: string; time: number; }
 export interface SkuPurchases { sku: string; name: string; purchases: number; }
 export interface SearchTerm { term: string; count: number; }
+
+// Search Data Interfaces
+export interface SearchMetrics {
+  totalSearches: number;
+  uniqueSearchUsers: number;
+  avgSearchDepth: number;
+  searchConversionRate: number;
+  change: {
+    totalSearches: number;
+    uniqueSearchUsers: number;
+    avgSearchDepth: number;
+    searchConversionRate: number;
+  };
+}
+
+export interface SearchTermData {
+  term: string;
+  searches: number;
+  clicks: number;
+  conversions: number;
+  ctr: number;
+  conversionRate: number;
+}
+
+export interface SearchClickPosition {
+  position: number;
+  clicks: number;
+  percentage: number;
+}
+
+export interface SearchBehavior {
+  exitRate: number;
+  refinementRate: number;
+  avgClickPosition: number;
+  zeroClickRate: number;
+}
+
+export interface SearchSource {
+  source: string;
+  searches: number;
+  percentage: number;
+}
+
+export interface SearchDevice {
+  device: string;
+  searches: number;
+  percentage: number;
+}
 export interface FunnelStep { id: string; value: number; label: string; }
 
 export type RawHourlyData = { id: string; data: { x: string; y: number }[] };
