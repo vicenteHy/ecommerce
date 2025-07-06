@@ -4,7 +4,6 @@ import { Inter as FontSans } from "next/font/google"
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
-import { CircleUser } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,7 +38,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
       )}>
         <div className="flex h-full max-h-screen flex-col gap-2">
           <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
-            <Link href="/" className="flex items-center gap-2 font-semibold">
+            <Link href="/overview" className="flex items-center gap-2 font-semibold">
               <span className="">数据分析平台</span>
             </Link>
           </div>
@@ -53,22 +52,6 @@ function MainLayout({ children }: { children: React.ReactNode }) {
           <SidebarToggle />
           <div className="w-full flex-1">
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="secondary" size="icon" className="rounded-full">
-                <CircleUser className="h-5 w-5" />
-                <span className="sr-only">Toggle user menu</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>我的账户</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>设置</DropdownMenuItem>
-              <DropdownMenuItem>支持</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>登出</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </header>
         {children}
       </div>

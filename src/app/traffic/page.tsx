@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { format } from "date-fns";
+import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
 
 // Import the data generation function and type
 import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
@@ -84,6 +85,25 @@ interface DeviceTypeData {
   end_date: string;
 }
 
+// 定义会话数据接口
+interface SessionData {
+  session_count: number;
+  avg_session_duration_seconds: number;
+  start_date: string;
+  end_date: string;
+}
+
+interface SessionComparisonData {
+  current: SessionData;
+  previous: SessionData;
+  comparison: {
+    session_count_change_rate: number;
+    session_count_change_amount: number;
+    duration_change_rate: number;
+    duration_change_amount: number;
+  };
+}
+
 export default function TrafficPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -93,6 +113,15 @@ export default function TrafficPage() {
   const [pageViewsData, setPageViewsData] = useState<PageViewsComparisonData | null>(null);
   // 新增设备类型数据状态
   const [deviceTypeData, setDeviceTypeData] = useState<DeviceTypeData | null>(null);
+  // 新增会话数据状态
+  const [sessionData, setSessionData] = useState<SessionComparisonData | null>(null);
+  // 新增日期范围选择状态
+  const today = new Date();
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  const [dateRange, setDateRange] = useState<DateRange>({from: thirtyDaysAgo, to: today});
+  // 新增错误状态
+  const [error, setError] = useState<string | null>(null);
 
   // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
   const formatDate = (date: Date): string => {
@@ -105,6 +134,13 @@ export default function TrafficPage() {
       console.error('格式化日期错误:', err);
       return date.toISOString().split('T')[0];
     }
+  };
+
+  // 格式化秒数为分钟:秒格式
+  const formatDuration = (seconds: number): string => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
   // 获取后端活跃用户数据
@@ -238,6 +274,49 @@ export default function TrafficPage() {
     }
   };
 
+  // 获取后端会话数据
+  const fetchSessionData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/traffic/sessions/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求会话数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析会话数据JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('会话数据:', data);
+      
+      // 检查数据格式
+      const isValidData = data && typeof data === 'object' && 'current' in data && 'previous' in data && 'comparison' in data;
+      
+      if (isValidData) {
+        setSessionData(data);
+      } else {
+        console.log('会话数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取会话数据错误:', err);
+    }
+  };
+
   useEffect(() => {
     // Generate data dynamically using the imported function
     const generatedData = generateDataForRange(selectedRange);
@@ -268,97 +347,50 @@ export default function TrafficPage() {
         break;
     }
     
+    setDateRange({from, to} as DateRange);
     fetchActiveUsersData(from, to);
     fetchPageViewsData(from, to);
     fetchDeviceTypeData(from, to);
+    fetchSessionData(from, to);
   }, [selectedRange]);
+  
+  // 处理日期范围变更
+  const handleDateRangeChange = (range: DateRange) => {
+    if (range.from && range.to) {
+      // 检查日期范围是否合理
+      if (range.from > range.to) {
+        setError('起始日期不能大于结束日期');
+        return;
+      }
+      
+      // 将本地时间转换为UTC时间
+      const utcFrom = new Date(Date.UTC(
+        range.from.getFullYear(),
+        range.from.getMonth(),
+        range.from.getDate(),
+        0, 0, 0
+      ));
+      const utcTo = new Date(Date.UTC(
+        range.to.getFullYear(),
+        range.to.getMonth(),
+        range.to.getDate(),
+        23, 59, 59
+      ));
+      
+      setDateRange(range);
+      setError(null); // 清除之前的错误提示
+      fetchActiveUsersData(utcFrom, utcTo);
+      fetchPageViewsData(utcFrom, utcTo);
+      fetchDeviceTypeData(utcFrom, utcTo);
+      fetchSessionData(utcFrom, utcTo);
+    }
+  };
 
   if (!dashboardData) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
   }
 
-  // Calculate dynamic Y-axis max for pageViews chart
-  let maxPageViewValue = 0;
-  dashboardData.combinedPageViewsData.forEach(item => {
-    if (item.current > maxPageViewValue) maxPageViewValue = item.current;
-    if (item.comparison > maxPageViewValue) maxPageViewValue = item.comparison;
-  });
-
-  // Helper function to calculate a "nice" upper bound for the Y axis
-  const calculateYMax = (maxValue: number): number => {
-    if (maxValue <= 0) return 500; // Default max if no positive data
-
-    // Determine a step based on the magnitude of the max value
-    let step = 100;
-    if (maxValue > 10000) {
-      step = 1000;
-    } else if (maxValue > 1000) {
-      step = 500;
-    }
-
-    let ceilValue = Math.ceil(maxValue / step) * step;
-
-    // Ensure the calculated max is strictly greater than the data max
-    if (ceilValue <= maxValue) {
-      ceilValue += step;
-    }
-    // Ensure minimum ceiling gap if max value is too close to ceiling
-    if (maxValue > ceilValue * 0.95) {
-      ceilValue += step;
-    }
-
-    return ceilValue;
-  };
-
-  const pageViewsYScaleMax = calculateYMax(maxPageViewValue);
   
-  // Determine X axis scale type based on granularity
-  const visitsXScale = dashboardData.timeGranularity === 'hourly'
-    ? { type: 'point' as const }
-    : dashboardData.timeGranularity === 'monthly'
-      ? { type: 'time' as const, precision: 'month' as const }
-      : { type: 'time' as const, precision: 'day' as const };
-
-  // Define tick values and format based on granularity for visits chart X-axis
-  let visitsAxisBottom = { ...dashboardData.commonLineProps.axisBottom };
-
-  if (dashboardData.timeGranularity === 'daily') {
-    const currentDauData = dashboardData.dauChartData?.find(s => s.id === 'current')?.data ?? [];
-    const dataLength = currentDauData.length;
-
-    // Set format for daily
-    visitsAxisBottom.format = dashboardData.xAxisFormat;
-
-    // Set tick values based on date range
-    if (selectedRange === 'last_7_days' && dataLength > 0) {
-      const dateTicks = currentDauData
-        .map(d => d.x)
-        .filter((x): x is Date => x instanceof Date);
-      const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
-      visitsAxisBottom.tickValues = uniqueDateTicks;
-    } else if (selectedRange === 'last_30_days') {
-      visitsAxisBottom.tickValues = 'every 7 days';
-    } else if (dataLength > 8) {
-      visitsAxisBottom.tickValues = 'every 2 days';
-    } else {
-      delete visitsAxisBottom.tickValues;
-    }
-  } else if (dashboardData.timeGranularity === 'monthly') {
-    // Set format for monthly
-    visitsAxisBottom.format = dashboardData.xAxisFormat;
-
-    // Set ticks based on unique Date objects
-    const currentDauData = dashboardData.dauChartData?.find(s => s.id === 'current')?.data ?? [];
-    const dateTicks = currentDauData
-      .map(d => d.x)
-      .filter((x): x is Date => x instanceof Date);
-    const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
-    visitsAxisBottom.tickValues = uniqueDateTicks;
-  } else { // hourly
-    // Set format for hourly
-    visitsAxisBottom.format = dashboardData.xAxisFormat;
-    delete visitsAxisBottom.tickValues;
-  }
 
   // Create traffic source data
   const trafficSourceData = [
@@ -385,65 +417,72 @@ export default function TrafficPage() {
       color: '#a5b4fc',
       count: deviceTypeData.android
     },
-  ] : [
-    { id: 'iOS', label: 'iOS', value: 21.56, color: '#6366f1', count: 0 },
-    { id: 'Android', label: 'Android', value: 66.59, color: '#a5b4fc', count: 0 },
-  ];
+  ] : null;
 
-  // Create browser distribution data
-  const browserData = [
-    { browser: 'Chrome', value: Math.round(dashboardData.totalDAU * 0.62) },
-    { browser: 'Safari', value: Math.round(dashboardData.totalDAU * 0.18) },
-    { browser: '微信浏览器', value: Math.round(dashboardData.totalDAU * 0.09) },
-    { browser: 'Firefox', value: Math.round(dashboardData.totalDAU * 0.06) },
-    { browser: 'Edge', value: Math.round(dashboardData.totalDAU * 0.04) },
-    { browser: '其他', value: Math.round(dashboardData.totalDAU * 0.01) },
-  ];
-
-  // Calculate bounce rate and average session metrics
-  const bounceRate = 35 + Math.floor(Math.random() * 10); // 35-45%
-  const bounceRateChange = Math.floor(Math.random() * 10) - 5; // -5 to +5%
-
-  const avgSessionDuration = 180 + Math.floor(Math.random() * 60); // 3-4 min in seconds
-  const avgSessionDurationChange = Math.floor(Math.random() * 20) - 10; // -10 to +10%
-
-  // Create user behavior data
-  const userBehaviorData = [
-    {
-      id: "页面浏览",
-      data: dashboardData.dauChartData[0].data.map(item => ({
-        x: item.x,
-        y: typeof item.y === 'number' ? Math.round(item.y * (Math.random() * 1.2 + 2.8)) : 0 // ~4 pages per user
-      }))
-    },
-    {
-      id: "留存率",
-      data: dashboardData.dauChartData[0].data.map(item => ({
-        x: item.x,
-        y: typeof item.y === 'number' ? (100 - bounceRate) + (Math.random() * 10 - 5) : 0 // 100% - bounce rate with noise
-      }))
-    }
-  ];
 
   return (
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">流量数据</h1>
-        <Select value={selectedRange} onValueChange={setSelectedRange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="选择时间范围" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">今天</SelectItem>
-            <SelectItem value="last_7_days">近7天</SelectItem>
-            <SelectItem value="last_30_days">近30天</SelectItem>
-            <SelectItem value="last_6_months">近6个月</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex gap-4 items-center">
+          {/* 添加日期选择器 */}
+          <DateRangePicker 
+            dateRange={dateRange} 
+            onRangeChange={(range) => {
+              // 只更新UI状态，不发送请求
+              setDateRange(range);
+            }} 
+            placeholder="选择日期范围"
+            onConfirm={(range) => {
+              // 检查日期范围是否合理
+              if (range.from > range.to) {
+                setError('起始日期不能大于结束日期');
+                return;
+              }
+              
+              // 检查是否选择了未来日期
+              const now = new Date();
+              if (range.from > now) {
+                setError('开始日期不能是未来日期，请选择当前或过去的日期');
+                return;
+              }
+              
+              if (range.to > now) {
+                // 如果结束日期是未来，调整为今天（UTC时区）
+                const adjustedRange: DateRange = {
+                  from: range.from,
+                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
+                };
+                setDateRange(adjustedRange);
+                handleDateRangeChange(adjustedRange);
+              } else {
+                // 发送请求
+                handleDateRangeChange(range);
+              }
+            }}
+          />
+          <Select value={selectedRange} onValueChange={setSelectedRange}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="选择时间范围" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">今天</SelectItem>
+              <SelectItem value="last_7_days">近7天</SelectItem>
+              <SelectItem value="last_30_days">近30天</SelectItem>
+              <SelectItem value="last_6_months">近6个月</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+      
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md">
+          {error}
+        </div>
+      )}
 
       {/* Traffic Overview Section */}
-      <div className="grid gap-4 md:grid-cols-4 mb-6">
+      <div className="grid gap-4 md:grid-cols-3 mb-6">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">访问人数 ({dashboardData.currentLabel})</CardTitle>
@@ -459,15 +498,7 @@ export default function TrafficPage() {
                   )}
                 </>
               ) : (
-                <>
-                  {dashboardData.totalDAU.toLocaleString()}
-                  {isFinite(dashboardData.dauChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.dauChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.dauChange >= 0 ? '+' : ''}{dashboardData.dauChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
-                </>
+                '加载中...'
               )}
             </CardDescription>
           </CardHeader>
@@ -488,29 +519,8 @@ export default function TrafficPage() {
                   )}
                 </>
               ) : (
-                <>
-                  {dashboardData.totalPageViews.toLocaleString()}
-                  {isFinite(dashboardData.pageViewsChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.pageViewsChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.pageViewsChange >= 0 ? '+' : ''}{dashboardData.pageViewsChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
-                </>
+                '加载中...'
               )}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">留存率 ({dashboardData.currentLabel})</CardTitle>
-            <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {100 - bounceRate}%
-              <span className={`ml-2 text-xs font-medium ${bounceRateChange <= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {bounceRateChange <= 0 ? '+' : ''}{-bounceRateChange}%
-                <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-              </span>
             </CardDescription>
           </CardHeader>
         </Card>
@@ -519,11 +529,19 @@ export default function TrafficPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时长 ({dashboardData.currentLabel})</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {Math.floor(avgSessionDuration / 60)}分{avgSessionDuration % 60}秒
-              <span className={`ml-2 text-xs font-medium ${avgSessionDurationChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {avgSessionDurationChange >= 0 ? '+' : ''}{avgSessionDurationChange}%
-                <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-              </span>
+              {sessionData && sessionData.current ? (
+                <>
+                  {formatDuration(sessionData.current.avg_session_duration_seconds)}
+                  {sessionData.comparison && isFinite(sessionData.comparison.duration_change_rate) && (
+                    <span className={`ml-2 text-xs font-medium ${sessionData.comparison.duration_change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {sessionData.comparison.duration_change_rate >= 0 ? '+' : ''}{sessionData.comparison.duration_change_rate.toFixed(1)}%
+                      <span className="text-muted-foreground text-xs ml-1">(环比)</span>
+                    </span>
+                  )}
+                </>
+              ) : (
+                '加载中...'
+              )}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -537,141 +555,123 @@ export default function TrafficPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">访问趋势 ({dashboardData.currentLabel})</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
-            {/* 使用真实API数据（访问人数和访问趋势图表共享同一接口数据） */}
-            {activeUsersData && activeUsersData.current && activeUsersData.current.daily_data ? (
-              <ResponsiveLine
-                key={`visits-line-real-data`}
-                data={[
-                  {
-                    id: '当前时段',
-                    data: activeUsersData.current.daily_data.map(item => ({
-                      x: new Date(item.date),
-                      y: item.active_users
-                    }))
-                  },
-                  {
-                    id: '对比时段',
-                    data: (activeUsersData.previous.daily_data || []).map(item => ({
-                      x: new Date(item.date),
-                      y: item.active_users
-                    }))
-                  }
-                ]}
-                colors={['#6366f1', '#a5b4fc']}
-                lineWidth={2}
-                enablePoints={true}
-                pointSize={4}
-                pointBorderWidth={2}
-                pointBorderColor={{ from: 'serieColor' }}
-                useMesh={true}
-                enableGridX={false}
-                enableGridY={true}
-                xScale={{ type: 'time', precision: 'day' }}
-                xFormat="time:%Y-%m-%d"
-                yScale={{ type: 'linear', min: 0, max: 'auto' }}
-                margin={{ top: 20, right: 110, bottom: 50, left: 60 }}
-                axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: -45,
-                  format: '%m/%d',
-                  tickValues: activeUsersData.current.daily_data.length > 7 ? 
-                    'every 3 days' : 'every day'
-                }}
-                axisLeft={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      const valueInWan = v / 10000;
-                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
-                      return `${formattedValue}万`;
-                    } else if (v >= 1000) {
-                      const valueInQian = v / 1000;
-                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
-                      return `${formattedValue}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                tooltip={({ point }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{format(new Date(point.data.x as Date), 'MM月dd日')}</strong><br />
-                    {point.serieId}: {point.data.y} 人
+            {/* 使用真实API数据 */}
+            {activeUsersData && activeUsersData.current ? (
+              selectedRange === 'today' ? (
+                // 今天的数据显示为大数字
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="text-6xl font-bold text-foreground">
+                    {activeUsersData.current.active_users.toLocaleString()}
                   </div>
-                )}
-                legends={[
-                  {
-                    anchor: 'bottom-right',
-                    direction: 'column',
-                    justify: false,
-                    translateX: 100,
-                    translateY: 0,
-                    itemsSpacing: 0,
-                    itemDirection: 'left-to-right',
-                    itemWidth: 80,
-                    itemHeight: 20,
-                    itemOpacity: 0.75,
-                    symbolSize: 12,
-                    symbolShape: 'circle',
-                    effects: [
-                      {
-                        on: 'hover',
-                        style: {
-                          itemOpacity: 1
-                        }
+                  <div className="text-sm text-muted-foreground mt-4">
+                    今日访问人数
+                  </div>
+                  {activeUsersData.comparison && isFinite(activeUsersData.comparison.change_rate) && (
+                    <div className={`mt-2 text-sm font-medium ${activeUsersData.comparison.change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {activeUsersData.comparison.change_rate >= 0 ? '+' : ''}{activeUsersData.comparison.change_rate.toFixed(1)}%
+                      <span className="text-muted-foreground text-xs ml-1">(环比昨天)</span>
+                    </div>
+                  )}
+                </div>
+              ) : activeUsersData.current.daily_data ? (
+                // 其他时间范围显示曲线图
+                <ResponsiveLine
+                  key={`visits-line-real-data`}
+                  data={[
+                    {
+                      id: '当前时段',
+                      data: activeUsersData.current.daily_data.map(item => ({
+                        x: new Date(item.date),
+                        y: item.active_users
+                      }))
+                    },
+                    {
+                      id: '对比时段',
+                      data: (activeUsersData.previous.daily_data || []).map(item => ({
+                        x: new Date(item.date),
+                        y: item.active_users
+                      }))
+                    }
+                  ]}
+                  colors={['#6366f1', '#a5b4fc']}
+                  lineWidth={2}
+                  enablePoints={true}
+                  pointSize={4}
+                  pointBorderWidth={2}
+                  pointBorderColor={{ from: 'serieColor' }}
+                  useMesh={true}
+                  enableGridX={false}
+                  enableGridY={true}
+                  xScale={{ type: 'time', precision: 'day' }}
+                  xFormat="time:%Y-%m-%d"
+                  yScale={{ type: 'linear', min: 0, max: 'auto' }}
+                  margin={{ top: 20, right: 110, bottom: 50, left: 60 }}
+                  axisBottom={{
+                    tickSize: 5,
+                    tickPadding: 5,
+                    tickRotation: -45,
+                    format: '%m/%d',
+                    tickValues: activeUsersData.current.daily_data.length > 7 ? 
+                      'every 3 days' : 'every day'
+                  }}
+                  axisLeft={{
+                    tickSize: 5,
+                    tickPadding: 5,
+                    tickRotation: 0,
+                    format: (v) => {
+                      if (typeof v !== 'number') return String(v);
+                      if (v >= 10000) {
+                        const valueInWan = v / 10000;
+                        const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
+                        return `${formattedValue}万`;
+                      } else if (v >= 1000) {
+                        const valueInQian = v / 1000;
+                        const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
+                        return `${formattedValue}千`;
                       }
-                    ]
-                  }
-                ]}
-              />
-            ) : (
-              <ResponsiveLine
-                key={`visits-line-${dashboardData.timeGranularity}`}
-                {...dashboardData.commonLineProps}
-                data={dashboardData.dauChartData}
-                colors={['#6366f1', '#a5b4fc']}
-                lineWidth={2}
-                enablePoints={dashboardData.timeGranularity !== 'monthly'}
-                pointSize={dashboardData.timeGranularity === 'hourly' ? 6 : 4}
-                pointBorderWidth={2}
-                pointBorderColor={{ from: 'serieColor' }}
-                pointLabelYOffset={-12}
-                useMesh={true}
-                enableGridX={false}
-                enableGridY={true}
-                xScale={visitsXScale}
-                xFormat={dashboardData.timeGranularity === 'hourly' ? undefined :
-                         "time:%Y-%m-%d"
-                }
-                yScale={{ type: 'linear', min: 0, max: 'auto' }}
-                axisBottom={{
-                  ...visitsAxisBottom,
-                }}
-                axisLeft={{
-                  ...dashboardData.commonLineProps.axisLeft,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      const valueInWan = v / 10000;
-                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
-                      return `${formattedValue}万`;
-                    } else if (v >= 1000) {
-                      const valueInQian = v / 1000;
-                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
-                      return `${formattedValue}千`;
+                      return String(v);
+                    },
+                  }}
+                  tooltip={({ point }) => (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{format(new Date(point.data.x as Date), 'MM月dd日')}</strong><br />
+                      {point.serieId}: {point.data.y} 人
+                    </div>
+                  )}
+                  legends={[
+                    {
+                      anchor: 'bottom-right',
+                      direction: 'column',
+                      justify: false,
+                      translateX: 100,
+                      translateY: 0,
+                      itemsSpacing: 0,
+                      itemDirection: 'left-to-right',
+                      itemWidth: 80,
+                      itemHeight: 20,
+                      itemOpacity: 0.75,
+                      symbolSize: 12,
+                      symbolShape: 'circle',
+                      effects: [
+                        {
+                          on: 'hover',
+                          style: {
+                            itemOpacity: 1
+                          }
+                        }
+                      ]
                     }
-                    return String(v);
-                  },
-                }}
-                tooltip={({ point }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    {point.data.yFormatted.toLocaleString()}
-                  </div>
-                )}
-              />
+                  ]}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  加载中...
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                加载中...
+              </div>
             )}
           </CardContent>
         </Card>
@@ -708,10 +708,10 @@ export default function TrafficPage() {
               arcLabelsTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
               legends={[
                 {
-                  anchor: 'right',
+                  anchor: 'bottom-right',
                   direction: 'column',
                   justify: false,
-                  translateX: 0,
+                  translateX: 100,
                   translateY: 0,
                   itemsSpacing: 0,
                   itemWidth: 100,
@@ -747,339 +747,65 @@ export default function TrafficPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">设备类型分布 ({dashboardData.currentLabel})</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
-            <ResponsivePie
-              data={deviceData}
-              margin={{ top: 30, right: 80, bottom: 30, left: 80 }}
-              innerRadius={0.5}
-              padAngle={0.7}
-              cornerRadius={3}
-              activeOuterRadiusOffset={8}
-              colors={{ datum: 'data.color' }}
-              borderWidth={1}
-              borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
-              arcLinkLabelsSkipAngle={10}
-              arcLinkLabelsTextColor="#333333"
-              arcLinkLabelsThickness={2}
-              arcLinkLabelsColor={{ from: 'color' }}
-              arcLabelsSkipAngle={10}
-              arcLabelsTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
-              arcLabel={d => `${d.value}%`}
-              legends={[
-                {
-                  anchor: 'right',
-                  direction: 'column',
-                  justify: false,
-                  translateX: 0,
-                  translateY: 0,
-                  itemsSpacing: 0,
-                  itemWidth: 100,
-                  itemHeight: 20,
-                  itemTextColor: '#999',
-                  itemDirection: 'left-to-right',
-                  itemOpacity: 1,
-                  symbolSize: 18,
-                  symbolShape: 'circle',
-                  effects: [
-                    {
-                      on: 'hover',
-                      style: {
-                        itemTextColor: '#000'
-                      }
-                    }
-                  ]
-                }
-              ]}
-              tooltip={({ datum }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{datum.id}</strong><br />
-                  {datum.value}%<br />
-                  数量: {datum.data.count?.toLocaleString() || 0}
-                </div>
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 4. Page Views by Page */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">页面浏览分布 ({dashboardData.currentLabel})</CardTitle>
-          </CardHeader>
-          <CardContent className="h-80">
-            {pageViewsData && pageViewsData.current && pageViewsData.current.pages ? (
-              <ResponsiveBar
-                {...dashboardData.commonBarProps}
-                data={(() => {
-                  // 转换API数据为图表格式
-                  const currentPages = pageViewsData.current.pages;
-                  const previousPages = pageViewsData.previous.pages;
-                  
-                  return currentPages.map((page) => {
-                    // 在对比时间段中查找相同的页面
-                    const previousPage = previousPages.find(prev => prev.page_name === page.page_name);
-                    return {
-                      page: page.page_name,
-                      current: page.page_views,
-                      comparison: previousPage ? previousPage.page_views : 0
-                    };
-                  });
-                })()}
-                keys={['current', 'comparison']}
-                indexBy="page"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-                padding={0.3}
-                defs={dashboardData.gradientDefs}
-                fill={[
-                  { match: { id: 'current' }, id: 'gradientCurrent' },
-                  { match: { id: 'comparison' }, id: 'gradientComparison' }
-                ]}
-                axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: -45,
-                }}
-                axisLeft={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      return `${(v / 10000).toFixed(1)}万`;
-                    } else if (v >= 1000) {
-                      return `${(v / 1000).toFixed(1)}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                enableLabel={false}
+            {deviceData ? (
+              <ResponsivePie
+                data={deviceData}
+                margin={{ top: 30, right: 80, bottom: 30, left: 80 }}
+                innerRadius={0.5}
+                padAngle={0.7}
+                cornerRadius={3}
+                activeOuterRadiusOffset={8}
+                colors={{ datum: 'data.color' }}
+                borderWidth={1}
+                borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
+                arcLinkLabelsSkipAngle={10}
+                arcLinkLabelsTextColor="#333333"
+                arcLinkLabelsThickness={2}
+                arcLinkLabelsColor={{ from: 'color' }}
+                arcLabelsSkipAngle={10}
+                arcLabelsTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
+                arcLabel={d => `${d.value}%`}
                 legends={[
                   {
-                    dataFrom: 'keys',
-                    anchor: 'top-right',
+                    anchor: 'bottom-right',
                     direction: 'column',
                     justify: false,
-                    translateX: 0,
+                    translateX: 100,
                     translateY: 0,
-                    itemsSpacing: 2,
+                    itemsSpacing: 0,
                     itemWidth: 100,
                     itemHeight: 20,
+                    itemTextColor: '#999',
                     itemDirection: 'left-to-right',
-                    itemOpacity: 0.85,
-                    symbolSize: 20,
+                    itemOpacity: 1,
+                    symbolSize: 18,
+                    symbolShape: 'circle',
                     effects: [
                       {
                         on: 'hover',
                         style: {
-                          itemOpacity: 1
+                          itemTextColor: '#000'
                         }
                       }
                     ]
                   }
                 ]}
-                tooltip={({ id, value, indexValue }) => (
+                tooltip={({ datum }) => (
                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{indexValue}</strong><br />
-                    {id === 'current' ? '当前' : '对比'}: {value.toLocaleString()} 次浏览
+                    <strong>{datum.id}</strong><br />
+                    {datum.value}%<br />
+                    数量: {datum.data.count?.toLocaleString() || 0}
                   </div>
                 )}
               />
             ) : (
-              <ResponsiveBar
-                {...dashboardData.commonBarProps}
-                data={dashboardData.combinedPageViewsData}
-                keys={['current', 'comparison']}
-                indexBy="page"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-                padding={0.3}
-                defs={dashboardData.gradientDefs}
-                fill={[
-                  { match: { id: 'current' }, id: 'gradientCurrent' },
-                  { match: { id: 'comparison' }, id: 'gradientComparison' }
-                ]}
-                axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: -45,
-                }}
-                axisLeft={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      return `${(v / 10000).toFixed(1)}万`;
-                    } else if (v >= 1000) {
-                      return `${(v / 1000).toFixed(1)}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                enableLabel={false}
-                legends={[
-                  {
-                    dataFrom: 'keys',
-                    anchor: 'top-right',
-                    direction: 'column',
-                    justify: false,
-                    translateX: 0,
-                    translateY: 0,
-                    itemsSpacing: 2,
-                    itemWidth: 100,
-                    itemHeight: 20,
-                    itemDirection: 'left-to-right',
-                    itemOpacity: 0.85,
-                    symbolSize: 20,
-                    effects: [
-                      {
-                        on: 'hover',
-                        style: {
-                          itemOpacity: 1
-                        }
-                      }
-                    ]
-                  }
-                ]}
-                tooltip={({ id, value, indexValue }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{indexValue}</strong><br />
-                    {value.toLocaleString()}
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-500">
+                加载中...
+              </div>
             )}
           </CardContent>
         </Card>
 
-        {/* 5. Browser Distribution */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">浏览器分布 ({dashboardData.currentLabel})</CardTitle>
-          </CardHeader>
-          <CardContent className="h-80">
-            <ResponsiveBar
-              {...dashboardData.commonBarProps}
-              data={browserData}
-              keys={['value']}
-              indexBy="browser"
-              margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-              padding={0.3}
-              colors={['#6366f1']}
-              axisBottom={{
-                tickSize: 5,
-                tickPadding: 5,
-                tickRotation: 0,
-              }}
-              axisLeft={{
-                tickSize: 5,
-                tickPadding: 5,
-                tickRotation: 0,
-                format: (v) => {
-                  if (typeof v !== 'number') return String(v);
-                  if (v >= 10000) {
-                    return `${(v / 10000).toFixed(1)}万`;
-                  } else if (v >= 1000) {
-                    return `${(v / 1000).toFixed(1)}千`;
-                  }
-                  return String(v);
-                },
-              }}
-              enableLabel={true}
-              labelSkipWidth={16}
-              labelFormat={value => `${((value / dashboardData.totalDAU) * 100).toFixed(1)}%`}
-              tooltip={({ id, value, indexValue, color, data }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{indexValue}</strong><br />
-                  {value.toLocaleString()} ({((value / dashboardData.totalDAU) * 100).toFixed(1)}%)
-                </div>
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 6. User Behavior Metrics */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">用户行为指标变化 ({dashboardData.currentLabel})</CardTitle>
-          </CardHeader>
-          <CardContent className="h-80">
-            <ResponsiveLine
-              {...dashboardData.commonLineProps}
-              data={userBehaviorData}
-              colors={['#6366f1', '#ef4444']} // Pages, Bounce rate
-              lineWidth={2}
-              enablePoints={dashboardData.timeGranularity !== 'monthly'}
-              pointSize={dashboardData.timeGranularity === 'hourly' ? 6 : 4}
-              pointBorderWidth={2}
-              pointBorderColor={{ from: 'serieColor' }}
-              pointLabelYOffset={-12}
-              useMesh={true}
-              enableGridX={false}
-              enableGridY={true}
-              xScale={visitsXScale}
-              xFormat={dashboardData.timeGranularity === 'hourly' ? undefined :
-                      "time:%Y-%m-%d"
-              }
-              yScale={{
-                type: 'linear',
-                min: 0,
-                max: 'auto',
-                stacked: false
-              }}
-              axisBottom={{
-                ...visitsAxisBottom,
-              }}
-              axisLeft={{
-                ...dashboardData.commonLineProps.axisLeft,
-                legend: '页面浏览量',
-                legendOffset: -40,
-                legendPosition: 'middle'
-              }}
-              axisRight={{
-                tickSize: 5,
-                tickPadding: 5,
-                tickRotation: 0,
-                legend: '留存率 (%)',
-                legendOffset: 40,
-                legendPosition: 'middle'
-              }}
-              legends={[
-                {
-                  anchor: 'top-right',
-                  direction: 'column',
-                  justify: false,
-                  translateX: 0,
-                  translateY: 0,
-                  itemsSpacing: 0,
-                  itemDirection: 'left-to-right',
-                  itemWidth: 80,
-                  itemHeight: 20,
-                  itemOpacity: 0.75,
-                  symbolSize: 12,
-                  symbolShape: 'circle',
-                  symbolBorderColor: 'rgba(0, 0, 0, .5)',
-                  effects: [
-                      {
-                          on: 'hover',
-                          style: {
-                              itemBackground: 'rgba(0, 0, 0, .03)',
-                              itemOpacity: 1
-                          }
-                      }
-                  ]
-                }
-              ]}
-              tooltip={({ point }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  {point.serieId === '留存率' ? 
-                    `${point.data.yFormatted}%` : 
-                    point.data.yFormatted.toLocaleString()}
-                </div>
-              )}
-            />
-          </CardContent>
-        </Card>
 
         {/* 7. Geographic Distribution */}
         <Card className="md:col-span-2">

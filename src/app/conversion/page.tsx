@@ -179,11 +179,63 @@ export default function ConversionPage() {
     const generatedData = generateDataForRange(selectedRange);
     setDashboardData(generatedData);
     
-    // 获取转化漏斗数据
-    if (dateRange.from && dateRange.to) {
-      fetchFunnelData(dateRange.from, dateRange.to);
+    // 根据选择的范围设置日期（UTC时区）
+    const now = new Date();
+    let from = new Date();
+    let to = new Date();
+    
+    switch (selectedRange) {
+      case 'last_7_days':
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
+        break;
+      case 'last_30_days':
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
+        break;
+      case 'last_6_months':
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
+        break;
+      default: // 'today'
+        // 对于今天，使用今天的UTC 0点到23:59
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
+        break;
     }
-  }, [selectedRange, dateRange]);
+    
+    setDateRange({from, to} as DateRange);
+    fetchFunnelData(from, to);
+  }, [selectedRange]);
+  
+  // 处理日期范围变更
+  const handleDateRangeChange = (range: DateRange) => {
+    if (range.from && range.to) {
+      // 检查日期范围是否合理
+      if (range.from > range.to) {
+        setError('起始日期不能大于结束日期');
+        return;
+      }
+      
+      // 将本地时间转换为UTC时间
+      const utcFrom = new Date(Date.UTC(
+        range.from.getFullYear(),
+        range.from.getMonth(),
+        range.from.getDate(),
+        0, 0, 0
+      ));
+      const utcTo = new Date(Date.UTC(
+        range.to.getFullYear(),
+        range.to.getMonth(),
+        range.to.getDate(),
+        23, 59, 59
+      ));
+      
+      setDateRange(range);
+      setError(null); // 清除之前的错误提示
+      fetchFunnelData(utcFrom, utcTo);
+    }
+  };
 
   if (!dashboardData) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
@@ -326,18 +378,62 @@ export default function ConversionPage() {
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">转化数据</h1>
-        <Select value={selectedRange} onValueChange={setSelectedRange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="选择时间范围" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">今天</SelectItem>
-            <SelectItem value="last_7_days">近7天</SelectItem>
-            <SelectItem value="last_30_days">近30天</SelectItem>
-            <SelectItem value="last_6_months">近6个月</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex gap-4 items-center">
+          {/* 添加日期选择器 */}
+          <DateRangePicker 
+            dateRange={dateRange} 
+            onRangeChange={(range) => {
+              // 只更新UI状态，不发送请求
+              setDateRange(range);
+            }} 
+            placeholder="选择日期范围"
+            onConfirm={(range) => {
+              // 检查日期范围是否合理
+              if (range.from > range.to) {
+                setError('起始日期不能大于结束日期');
+                return;
+              }
+              
+              // 检查是否选择了未来日期
+              const now = new Date();
+              if (range.from > now) {
+                setError('开始日期不能是未来日期，请选择当前或过去的日期');
+                return;
+              }
+              
+              if (range.to > now) {
+                // 如果结束日期是未来，调整为今天（UTC时区）
+                const adjustedRange: DateRange = {
+                  from: range.from,
+                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
+                };
+                setDateRange(adjustedRange);
+                handleDateRangeChange(adjustedRange);
+              } else {
+                // 发送请求
+                handleDateRangeChange(range);
+              }
+            }}
+          />
+          <Select value={selectedRange} onValueChange={setSelectedRange}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="选择时间范围" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">今天</SelectItem>
+              <SelectItem value="last_7_days">近7天</SelectItem>
+              <SelectItem value="last_30_days">近30天</SelectItem>
+              <SelectItem value="last_6_months">近6个月</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+      
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-md">
+          {error}
+        </div>
+      )}
 
       {/* Conversion Overview Section */}
       <div className="grid gap-4 md:grid-cols-5 mb-6">

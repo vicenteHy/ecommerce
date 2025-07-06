@@ -21,8 +21,6 @@ import {
 import { format } from "date-fns";
 import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
 
-// Import the data generation function and type
-import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
 
 // 定义Sales数据接口
 interface SalesTimeData {
@@ -140,7 +138,6 @@ interface SalesComparisonData {
 
 export default function SalesPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   // 新增销售数据状态
   const [salesData, setSalesData] = useState<SalesComparisonData | null>(null);
   // 新增商品销量数据状态
@@ -339,10 +336,22 @@ export default function SalesPage() {
       
       console.log('解析后的商品销量数据:', data);
       
-      // 验证数据格式
-      if (data && typeof data === 'object' && 'current' in data && 'previous' in data && 'comparison' in data) {
+      // 验证数据格式并转换为期望的格式
+      if (data && typeof data === 'object' && 'current' in data && 'previous' in data && 'summary' in data) {
         console.log('使用真实商品销量数据');
-        setItemsSoldData(data);
+        // 转换数据格式
+        const formattedData = {
+          current: {
+            total_items_sold: data.summary.current_total
+          },
+          previous: {
+            total_items_sold: data.summary.previous_total
+          },
+          comparison: {
+            total_items_sold_change: data.summary.total_change_rate
+          }
+        };
+        setItemsSoldData(formattedData);
       } else {
         console.log('商品销量数据格式不正确');
       }
@@ -429,9 +438,6 @@ export default function SalesPage() {
   
   useEffect(() => {
     console.log("Selected range changed:", selectedRange);
-    // Generate data dynamically using the imported function
-    const generatedData = generateDataForRange(selectedRange);
-    setDashboardData(generatedData);
     
     // 根据选择的范围设置日期（UTC时区）
     const now = new Date();
@@ -496,21 +502,6 @@ export default function SalesPage() {
     }
   };
 
-  if (!dashboardData) {
-    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
-  }
-
-  // Calculate dynamic Y-axis max for Sales chart
-  let maxYValue = 0;
-  if (dashboardData.lineChartSalesData) {
-    dashboardData.lineChartSalesData.forEach(series => {
-      series.data.forEach(point => {
-        if (typeof point.y === 'number' && point.y > maxYValue) {
-          maxYValue = point.y;
-        }
-      });
-    });
-  }
 
   // Helper function to calculate a "nice" upper bound for the Y axis
   const calculateYMax = (maxValue: number): number => {
@@ -538,81 +529,56 @@ export default function SalesPage() {
     return ceilValue;
   };
 
-  const salesYScaleMax = calculateYMax(maxYValue);
+  // 定义基本的图表配置
+  const commonLineProps = {
+    margin: { top: 20, right: 20, bottom: 40, left: 50 },
+    enableGridX: false,
+    enableGridY: true,
+    axisBottom: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+    axisLeft: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+  };
 
-  // Determine X axis scale type based on granularity
-  const salesXScale = dashboardData.timeGranularity === 'hourly'
-    ? { type: 'point' as const }
-    : dashboardData.timeGranularity === 'monthly'
-      ? { type: 'time' as const, precision: 'month' as const }
-      : { type: 'time' as const, precision: 'day' as const };
+  const commonBarProps = {
+    margin: { top: 20, right: 20, bottom: 40, left: 50 },
+    padding: 0.3,
+    axisBottom: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+    axisLeft: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+  };
 
-  // Define tick values and format based on granularity for Sales chart X-axis
-  let salesAxisBottom = { ...dashboardData.commonLineProps.axisBottom };
-
-  if (dashboardData.timeGranularity === 'daily') {
-    const currentSalesData = dashboardData.lineChartSalesData?.find(s => s.id === 'current')?.data ?? [];
-    const dataLength = currentSalesData.length;
-
-    // Set format for daily
-    salesAxisBottom.format = dashboardData.xAxisFormat;
-
-    // Set tick values based on date range
-    if (selectedRange === 'last_7_days' && dataLength > 0) {
-      const dateTicks = currentSalesData
-        .map(d => d.x)
-        .filter((x): x is Date => x instanceof Date);
-      const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
-      salesAxisBottom.tickValues = uniqueDateTicks;
-    } else if (selectedRange === 'last_30_days') {
-      salesAxisBottom.tickValues = 'every 7 days';
-    } else if (dataLength > 8) {
-      salesAxisBottom.tickValues = 'every 2 days';
-    } else {
-      delete salesAxisBottom.tickValues;
-    }
-  } else if (dashboardData.timeGranularity === 'monthly') {
-    // Set format for monthly
-    salesAxisBottom.format = dashboardData.xAxisFormat;
-
-    // Set ticks based on unique Date objects
-    const currentSalesData = dashboardData.lineChartSalesData?.find(s => s.id === 'current')?.data ?? [];
-    const dateTicks = currentSalesData
-      .map(d => d.x)
-      .filter((x): x is Date => x instanceof Date);
-    const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
-    salesAxisBottom.tickValues = uniqueDateTicks;
-  } else { // hourly
-    // Set format for hourly
-    salesAxisBottom.format = dashboardData.xAxisFormat;
-    delete salesAxisBottom.tickValues;
-  }
-
-  // Create sales by product categories data from items purchased data
-  const salesByProductData = dashboardData.combinedItemsPurchasedData.map(item => ({
-    ...item,
-    // Convert purchases to sales value (simple simulation)
-    currentSales: item.current * (Math.random() * 100 + 50), // Random price between 50-150
-    comparisonSales: item.comparison * (Math.random() * 100 + 50)
-  }));
-
-  // Create sales by country/region data
-  const salesByRegionData = dashboardData.combinedOrdersData.map(item => ({
-    ...item,
-    // Convert orders to sales value (simple simulation)
-    currentSales: item.current * (Math.random() * 200 + 100), // Random AOV between 100-300
-    comparisonSales: item.comparison * (Math.random() * 200 + 100)
-  }));
-
-  // Create customer segment data (based on AOV data with modifications)
-  const customerSegmentData = dashboardData.combinedAovData.map(segment => ({
-    id: segment.label,
-    label: segment.label,
-    value: segment.current,
-    color: segment.label === '0-100' ? '#818cf8' :
-           segment.label === '100-500' ? '#6366f1' :
-           segment.label === '500-1000' ? '#4f46e5' : '#4338ca',
-  }));
+  const gradientDefs = [
+    {
+      id: 'gradientCurrent',
+      type: 'linearGradient',
+      colors: [
+        { offset: 0, color: '#6366f1' },
+        { offset: 100, color: '#6366f1' },
+      ],
+    },
+    {
+      id: 'gradientComparison',
+      type: 'linearGradient',
+      colors: [
+        { offset: 0, color: '#a5b4fc' },
+        { offset: 100, color: '#a5b4fc' },
+      ],
+    },
+  ];
 
   return (
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
@@ -699,13 +665,7 @@ export default function SalesPage() {
                 </>
               ) : (
                 <>
-                  ¥{dashboardData.totalSales.toLocaleString()}
-                  {isFinite(dashboardData.salesChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.salesChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.salesChange >= 0 ? '+' : ''}{dashboardData.salesChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
+                  暂无数据
                 </>
               )}
             </CardDescription>
@@ -728,13 +688,7 @@ export default function SalesPage() {
                 </>
               ) : (
                 <>
-                  {dashboardData.totalOrders.toLocaleString()}
-                  {isFinite(dashboardData.ordersChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.ordersChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.ordersChange >= 0 ? '+' : ''}{dashboardData.ordersChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
+                  暂无数据
                 </>
               )}
             </CardDescription>
@@ -757,13 +711,7 @@ export default function SalesPage() {
                 </>
               ) : (
                 <>
-                  ¥{dashboardData.averageOrderValue.toFixed(2)}
-                  {isFinite(dashboardData.aovChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.aovChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.aovChange >= 0 ? '+' : ''}{dashboardData.aovChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
+                  暂无数据
                 </>
               )}
             </CardDescription>
@@ -800,110 +748,89 @@ export default function SalesPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">销售趋势</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
-            {salesData && salesData.lineChartSalesData ? (
-              <ResponsiveLine
-                key={`sales-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
-                {...dashboardData.commonLineProps}
-                data={salesData.lineChartSalesData}
-                colors={['#6366f1']} // 只保留当前数据的颜色
-                lineWidth={2}
-                enablePoints={true}
-                pointSize={4}
-                pointBorderWidth={2}
-                pointBorderColor={{ from: 'serieColor' }}
-                pointLabelYOffset={-12}
-                useMesh={true}
-                enableGridX={false}
-                enableGridY={true}
-                xScale={{ 
-                  type: 'time',
-                  precision: 'day'
-                }}
-                xFormat="time:%Y-%m-%d"
-                yScale={{ 
-                  type: 'linear', 
-                  min: 0, 
-                  max: calculateYMax(Math.max(...salesData.lineChartSalesData
-                    .flatMap(series => series.data
-                      .map(point => typeof point.y === 'number' ? point.y : 0)
-                    ))) 
-                }}
-                axisBottom={{
-                  tickSize: 0,
-                  tickPadding: 10,
-                  tickRotation: 0,
-                  format: '%m/%d', // 简化日期显示
-                }}
-                axisLeft={{
-                  ...dashboardData.commonLineProps.axisLeft,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      const valueInWan = v / 10000;
-                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
-                      return `${formattedValue}万`;
-                    } else if (v >= 1000) {
-                      const valueInQian = v / 1000;
-                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
-                      return `${formattedValue}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                tooltip={({ point }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'}
+            {salesData && salesData.current ? (
+              selectedRange === 'today' ? (
+                // 今天的数据显示为大数字
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="text-6xl font-bold text-foreground">
+                    ¥{salesData.current.total_amount.toLocaleString()}
                   </div>
-                )}
-              />
+                  <div className="text-sm text-muted-foreground mt-4">
+                    今日销售总额
+                  </div>
+                  {salesData.comparison && isFinite(salesData.comparison.total_amount_change) && (
+                    <div className={`mt-2 text-sm font-medium ${salesData.comparison.total_amount_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {salesData.comparison.total_amount_change >= 0 ? '+' : ''}{salesData.comparison.total_amount_change.toFixed(1)}%
+                      <span className="text-muted-foreground text-xs ml-1">(环比昨天)</span>
+                    </div>
+                  )}
+                </div>
+              ) : salesData.lineChartSalesData ? (
+                // 其他时间范围显示曲线图
+                <ResponsiveLine
+                  key={`sales-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
+                  {...commonLineProps}
+                  data={salesData.lineChartSalesData}
+                  colors={['#6366f1']} // 只保留当前数据的颜色
+                  lineWidth={2}
+                  enablePoints={true}
+                  pointSize={4}
+                  pointBorderWidth={2}
+                  pointBorderColor={{ from: 'serieColor' }}
+                  pointLabelYOffset={-12}
+                  useMesh={true}
+                  enableGridX={false}
+                  enableGridY={true}
+                  xScale={{ 
+                    type: 'time',
+                    precision: 'day'
+                  }}
+                  xFormat="time:%Y-%m-%d"
+                  yScale={{ 
+                    type: 'linear', 
+                    min: 0, 
+                    max: calculateYMax(Math.max(...salesData.lineChartSalesData
+                      .flatMap(series => series.data
+                        .map(point => typeof point.y === 'number' ? point.y : 0)
+                      ))) 
+                  }}
+                  axisBottom={{
+                    tickSize: 0,
+                    tickPadding: 10,
+                    tickRotation: 0,
+                    format: '%m/%d', // 简化日期显示
+                  }}
+                  axisLeft={{
+                    ...commonLineProps.axisLeft,
+                    format: (v) => {
+                      if (typeof v !== 'number') return String(v);
+                      if (v >= 10000) {
+                        const valueInWan = v / 10000;
+                        const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
+                        return `${formattedValue}万`;
+                      } else if (v >= 1000) {
+                        const valueInQian = v / 1000;
+                        const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
+                        return `${formattedValue}千`;
+                      }
+                      return String(v);
+                    },
+                  }}
+                  tooltip={({ point }) => (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'}
+                    </div>
+                  )}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-400">
+                  暂无销售趋势数据
+                </div>
+              )
             ) : (
-              <ResponsiveLine
-                key={`sales-line-${dashboardData.timeGranularity}`}
-                {...dashboardData.commonLineProps}
-                data={dashboardData.lineChartSalesData}
-                colors={['#6366f1', '#a5b4fc']} // Current, Comparison
-                lineWidth={2}
-                enablePoints={dashboardData.timeGranularity !== 'monthly'}
-                pointSize={dashboardData.timeGranularity === 'hourly' ? 6 : 4}
-                pointBorderWidth={2}
-                pointBorderColor={{ from: 'serieColor' }}
-                pointLabelYOffset={-12}
-                useMesh={true}
-                enableGridX={false}
-                enableGridY={true}
-                xScale={salesXScale}
-                xFormat={dashboardData.timeGranularity === 'hourly' ? undefined :
-                       "time:%Y-%m-%d"
-                }
-                yScale={{ type: 'linear', min: 0, max: salesYScaleMax }}
-                                axisBottom={{ 
-                  ...salesAxisBottom,
-                  legend: undefined,
-                  legendPosition: undefined,
-                  legendOffset: undefined
-                }}
-                axisLeft={{
-                  ...dashboardData.commonLineProps.axisLeft,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      const valueInWan = v / 10000;
-                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
-                      return `${formattedValue}万`;
-                    } else if (v >= 1000) {
-                      const valueInQian = v / 1000;
-                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
-                      return `${formattedValue}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                tooltip={({ point }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    {point.data.yFormatted.toLocaleString()}
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无销售趋势数据
+              </div>
             )}
           </CardContent>
         </Card>
@@ -916,7 +843,7 @@ export default function SalesPage() {
           <CardContent className="h-80">
             {categoriesData && categoriesData.current && categoriesData.current.categories ? (
               <ResponsiveBar
-                {...dashboardData.commonBarProps}
+                {...commonBarProps}
                 data={(() => {
                   // 创建对比数据，匹配当前品类与历史品类
                   return categoriesData.current.categories.map(currentCategory => {
@@ -934,7 +861,7 @@ export default function SalesPage() {
                 indexBy="category_name"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
-                defs={dashboardData.gradientDefs}
+                defs={gradientDefs}
                 fill={[
                   { match: { id: 'current' }, id: 'gradientCurrent' },
                   { match: { id: 'comparison' }, id: 'gradientComparison' }
@@ -990,13 +917,13 @@ export default function SalesPage() {
           <CardContent className="h-80">
             {salesData && salesData.combinedOrdersData ? (
               <ResponsiveBar
-                {...dashboardData.commonBarProps}
+                {...commonBarProps}
                 data={salesData.combinedOrdersData}
                 keys={['current', 'comparison']}
                 indexBy="country"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
-                defs={dashboardData.gradientDefs}
+                defs={gradientDefs}
                 fill={[
                   { match: { id: 'current' }, id: 'gradientCurrent' },
                   { match: { id: 'comparison' }, id: 'gradientComparison' }
@@ -1029,45 +956,9 @@ export default function SalesPage() {
                 )}
               />
             ) : (
-              <ResponsiveBar
-                {...dashboardData.commonBarProps}
-                data={salesByRegionData}
-                keys={['currentSales', 'comparisonSales']}
-                indexBy="country"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-                padding={0.3}
-                defs={dashboardData.gradientDefs}
-                fill={[
-                  { match: { id: 'currentSales' }, id: 'gradientCurrent' },
-                  { match: { id: 'comparisonSales' }, id: 'gradientComparison' }
-                ]}
-                axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                }}
-                axisLeft={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      return `${(v / 10000).toFixed(1)}万`;
-                    } else if (v >= 1000) {
-                      return `${(v / 1000).toFixed(1)}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                enableLabel={false}
-                legends={[]}
-                tooltip={({ id, value, indexValue, color, data }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    {value.toLocaleString()}
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无地区销售数据
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1080,7 +971,7 @@ export default function SalesPage() {
           <CardContent className="h-80">
             {salesData && salesData.current && salesData.current.payment_stats ? (
               <ResponsiveBar
-                {...dashboardData.commonBarProps}
+                {...commonBarProps}
                 data={Object.entries(salesData.current.payment_stats).map(([method, value]) => ({
                   method: method,
                   value: value
@@ -1124,47 +1015,9 @@ export default function SalesPage() {
                 }}
               />
             ) : (
-              <ResponsiveBar
-                {...dashboardData.commonBarProps}
-                data={[
-                  { method: '支付宝', value: dashboardData.totalSales * 0.45 },
-                  { method: '微信支付', value: dashboardData.totalSales * 0.4 },
-                  { method: '银联卡', value: dashboardData.totalSales * 0.08 },
-                  { method: '余额支付', value: dashboardData.totalSales * 0.05 },
-                  { method: '其他', value: dashboardData.totalSales * 0.02 },
-                ]}
-                keys={['value']}
-                indexBy="method"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-                padding={0.3}
-                colors={['#6366f1']}
-                axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                }}
-                axisLeft={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      return `${(v / 10000).toFixed(1)}万`;
-                    } else if (v >= 1000) {
-                      return `${(v / 1000).toFixed(1)}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                enableLabel={false}
-                tooltip={({ id, value, indexValue, color, data }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{indexValue}</strong><br />
-                    {value.toLocaleString()} ({((value / dashboardData.totalSales) * 100).toFixed(1)}%)
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无付款方式数据
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1245,56 +1098,9 @@ export default function SalesPage() {
                 }}
               />
             ) : (
-              <ResponsivePie
-                data={customerSegmentData}
-                margin={{ top: 30, right: 30, bottom: 70, left: 30 }}
-                innerRadius={0.5}
-                padAngle={0.7}
-                cornerRadius={3}
-                activeOuterRadiusOffset={8}
-                colors={{ datum: 'data.color' }}
-                borderWidth={1}
-                borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
-                arcLinkLabelsSkipAngle={10}
-                arcLinkLabelsTextColor="#555555"
-                arcLinkLabelsThickness={1.5}
-                arcLinkLabelsColor={{ from: 'color' }}
-                arcLabelsSkipAngle={10}
-                arcLabelsTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
-                enableArcLabels={false}
-                legends={[
-                  {
-                    anchor: 'bottom',
-                    direction: 'row',
-                    justify: false,
-                    translateX: 20,
-                    translateY: 60,
-                    itemsSpacing: 6,
-                    itemWidth: 80,
-                    itemHeight: 10,
-                    itemTextColor: '#555',
-                    itemDirection: 'left-to-right',
-                    itemOpacity: 1,
-                    symbolSize: 12,
-                    symbolShape: 'circle',
-                    symbolSpacing: 6,
-                    effects: [
-                      {
-                        on: 'hover',
-                        style: {
-                          itemTextColor: '#000'
-                        }
-                      }
-                    ]
-                  }
-                ]}
-                tooltip={({ datum }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{datum.id}</strong><br />
-                    {datum.value} 订单 ({datum.value}%)
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无客户价格区间数据
+              </div>
             )}
           </CardContent>
         </Card>

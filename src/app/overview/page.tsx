@@ -24,8 +24,6 @@ import { cn } from "@/lib/utils";
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
 
-// Import the data generation function and type using relative path
-import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
 
 // Define active users API response interface
 interface DailyActiveUsersData {
@@ -225,11 +223,33 @@ interface SessionComparisonData {
   };
 }
 
+// 定义商品销量数据接口
+interface DailyItemsSoldData {
+  date: string;
+  total_items_sold: number;
+}
+
+interface ItemsSoldData {
+  current: {
+    total_items_sold: number;
+    start_date?: string;
+    end_date?: string;
+    daily_data?: DailyItemsSoldData[];
+  };
+  previous: {
+    total_items_sold: number;
+    start_date?: string;
+    end_date?: string;
+    daily_data?: DailyItemsSoldData[];
+  };
+  comparison: {
+    total_items_sold_change: number;
+  };
+}
+
 // --- Page Component ---
 export default function DataOverviewPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
-  // Use the imported DashboardData type for state
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   // 新增销售数据状态
   const [salesData, setSalesData] = useState<SalesComparisonData | null>(null);
   // 新增活跃用户数据状态
@@ -242,6 +262,8 @@ export default function DataOverviewPage() {
   const [funnelData, setFunnelData] = useState<FunnelComparisonData | null>(null);
   // 新增会话数据状态
   const [sessionData, setSessionData] = useState<SessionComparisonData | null>(null);
+  // 新增商品销量数据状态
+  const [itemsSoldData, setItemsSoldData] = useState<ItemsSoldData | null>(null);
   // 新增日期范围选择状态
   // 设置默认日期范围：今天往前推30天
   const today = new Date();
@@ -530,6 +552,71 @@ export default function DataOverviewPage() {
     }
   };
 
+  // 获取商品销量数据
+  const fetchItemsSoldData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/sales/items-sold/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求商品销量URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        console.error(`商品销量API请求失败: ${response.status}`);
+        // 对于500错误，记录但不抛出异常
+        if (response.status === 500) {
+          console.log('商品销量服务器内部错误，将使用模拟数据');
+          return;
+        }
+        throw new Error(`商品销量请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      console.log('商品销量原始响应数据:', textData);
+      
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析商品销量JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('解析后的商品销量数据:', data);
+      
+      // 验证数据格式并转换为期望的格式
+      if (data && typeof data === 'object' && 'current' in data && 'previous' in data && 'summary' in data) {
+        console.log('使用真实商品销量数据');
+        // 转换数据格式
+        const formattedData = {
+          current: {
+            total_items_sold: data.summary.current_total,
+            daily_data: data.current
+          },
+          previous: {
+            total_items_sold: data.summary.previous_total,
+            daily_data: data.previous
+          },
+          comparison: {
+            total_items_sold_change: data.summary.total_change_rate
+          }
+        };
+        setItemsSoldData(formattedData);
+      } else {
+        console.log('商品销量数据格式不正确');
+      }
+      
+    } catch (err) {
+      console.error('获取商品销量数据错误:', err);
+    }
+  };
+
   // 获取后端活跃用户数据
   const fetchActiveUsersData = async (from: Date, to: Date) => {
     try {
@@ -665,9 +752,6 @@ export default function DataOverviewPage() {
   
   useEffect(() => {
     console.log("Selected range changed:", selectedRange);
-    // Generate data dynamically using the imported function
-    const generatedData = generateDataForRange(selectedRange);
-    setDashboardData(generatedData);
     
     // 根据选择的范围设置日期（UTC时区）
     const now = new Date();
@@ -702,6 +786,7 @@ export default function DataOverviewPage() {
     fetchPageViewsData(from, to);
     fetchFunnelData(from, to);
     fetchSessionData(from, to);
+    fetchItemsSoldData(from, to);
   }, [selectedRange]);
   
   // 处理日期范围变更
@@ -735,31 +820,15 @@ export default function DataOverviewPage() {
       fetchPageViewsData(utcFrom, utcTo);
       fetchFunnelData(utcFrom, utcTo);
       fetchSessionData(utcFrom, utcTo);
+      fetchItemsSoldData(utcFrom, utcTo);
     }
   };
 
 
-  if (!dashboardData) {
-    // TODO: Implement a better loading/skeleton state
-    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
-  }
-
-  // --- Calculate dynamic Y-axis max for Sales chart ---
-  let maxYValue = 0;
-  if (dashboardData.lineChartSalesData) {
-    dashboardData.lineChartSalesData.forEach(series => {
-      series.data.forEach(point => {
-        if (typeof point.y === 'number' && point.y > maxYValue) {
-          maxYValue = point.y;
-        }
-      });
-    });
-  }
 
   // Helper function to calculate a "nice" upper bound for the Y axis
   const calculateYMax = (maxValue: number): number => {
     if (maxValue <= 0) return 500; // Default max if no positive data
-
 
     // Determine a step based on the magnitude of the max value
     let step = 100;
@@ -773,8 +842,6 @@ export default function DataOverviewPage() {
 
     // Ensure the calculated max is strictly greater than the data max
     if (ceilValue <= maxValue) {
-      // Add a small buffer (e.g., 10% of step or a fixed amount) before recalculating ceiling
-      // Or simply add step to ensure it's always above
        ceilValue += step;
     }
     // Ensure minimum ceiling gap if max value is too close to ceiling
@@ -782,99 +849,64 @@ export default function DataOverviewPage() {
          ceilValue += step;
     }
 
-
     return ceilValue;
   };
 
-  const salesYScaleMax = calculateYMax(maxYValue);
+  // 定义基本的图表配置
+  const commonLineProps = {
+    margin: { top: 20, right: 20, bottom: 40, left: 50 },
+    enableGridX: false,
+    enableGridY: true,
+    axisBottom: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+    axisLeft: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+  };
 
-  // Determine X axis scale type for sales chart based on granularity
-   const salesXScale = dashboardData.timeGranularity === 'hourly'
-       ? { type: 'point' as const }
-       : dashboardData.timeGranularity === 'monthly'
-           ? { type: 'time' as const, precision: 'month' as const } // Use month precision for monthly
-           : { type: 'time' as const, precision: 'day' as const };
+  const commonBarProps = {
+    margin: { top: 20, right: 20, bottom: 40, left: 50 },
+    padding: 0.3,
+    axisBottom: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+    axisLeft: {
+      tickSize: 0,
+      tickPadding: 5,
+      tickRotation: 0,
+    },
+  };
 
-    // Define tick values AND FORMAT based on granularity for Sales chart X-axis
-    let salesAxisBottom = { ...dashboardData.commonLineProps.axisBottom };
+  const gradientDefs = [
+    {
+      id: 'gradientCurrent',
+      type: 'linearGradient',
+      colors: [
+        { offset: 0, color: '#6366f1' },
+        { offset: 100, color: '#6366f1' },
+      ],
+    },
+    {
+      id: 'gradientComparison',
+      type: 'linearGradient',
+      colors: [
+        { offset: 0, color: '#a5b4fc' },
+        { offset: 100, color: '#a5b4fc' },
+      ],
+    },
+  ];
 
-    if (dashboardData.timeGranularity === 'daily') {
-        const currentSalesData = dashboardData.lineChartSalesData?.find(s => s.id === 'current')?.data ?? [];
-        const dataLength = currentSalesData.length;
-
-        // Set format for daily
-        salesAxisBottom.format = dashboardData.xAxisFormat;
-
-        // Explicitly set tick values for last_7_days using the unique Date objects
-        if (selectedRange === 'last_7_days' && dataLength > 0) {
-             const dateTicks = currentSalesData
-                 .map(d => d.x)
-                 .filter((x): x is Date => x instanceof Date); // Ensure x are Date objects
-            // Nivo might need unique values, let's ensure that (though less likely needed with Date objects)
-             const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
-             salesAxisBottom.tickValues = uniqueDateTicks; // Use unique Date objects
-        } else if (selectedRange === 'last_30_days') {
-            salesAxisBottom.tickValues = 'every 7 days';
-        } else if (dataLength > 8) { // Apply to other long daily ranges if needed
-            salesAxisBottom.tickValues = 'every 2 days';
-        } else {
-            // Let Nivo decide ticks if not explicitly set
-             delete salesAxisBottom.tickValues;
-        }
-
-    } else if (dashboardData.timeGranularity === 'monthly') {
-      
-        // Set format for monthly
-        salesAxisBottom.format = dashboardData.xAxisFormat;
-
-        // Explicitly set ticks based on unique Date objects in the data
-        const currentSalesData = dashboardData.lineChartSalesData?.find(s => s.id === 'current')?.data ?? [];
-        const dateTicks = currentSalesData
-            .map(d => d.x)
-            .filter((x): x is Date => x instanceof Date);
-        const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
-        salesAxisBottom.tickValues = uniqueDateTicks;
-    } else { // hourly
-        // Set format for hourly
-        salesAxisBottom.format = dashboardData.xAxisFormat;
-
-        // Clear any specific tick values or format for hourly, rely on point scale and xAxisFormat passed below
-        delete salesAxisBottom.tickValues;
-    }
-
-    // Define tick values for DAU chart X-axis (similar logic)
-    let dauAxisBottom = { ...dashboardData.commonBarProps.axisBottom };
-    if (dashboardData.timeGranularity === 'daily') {
-        const dataLength = dashboardData.combinedDauData?.length ?? 0;
-        if (selectedRange === 'last_30_days' && dataLength > 0) {
-            // Manual tick calculation for 30 days
-            const desiredTicks = 5; // Aim for around 5 ticks
-            const step = Math.ceil(dataLength / (desiredTicks -1)); // Calculate step to include end
-            const ticksToShow = [];
-            for (let i = 0; i < dataLength; i += step) {
-                ticksToShow.push(dashboardData.combinedDauData[i].timeBlock);
-            }
-            // Ensure the last tick is always included if not already captured by step
-            if (dataLength > 0 && !ticksToShow.includes(dashboardData.combinedDauData[dataLength - 1].timeBlock)) {
-                 if (ticksToShow.length >= desiredTicks) ticksToShow.pop(); // Remove last if already enough ticks
-                 ticksToShow.push(dashboardData.combinedDauData[dataLength - 1].timeBlock);
-            }
-             dauAxisBottom.tickValues = ticksToShow;
-        } else if (dataLength > 8) {
-             dauAxisBottom.tickValues = 'every 2 days'; // Keep for 7 days view if long
-        }
-        // Remove format for daily ticks - use pre-formatted timeBlock
-        // dauAxisBottom.format = '%m/%d';
-    } else if (dashboardData.timeGranularity === 'monthly') {
-         dauAxisBottom.tickValues = 'every 1 month';
-         // Remove format for monthly ticks - use pre-formatted time scale
-         // dauAxisBottom.format = '%Y-%m';
-    } else { // hourly
-        // Reset for hourly (uses timeBlock string)
-        dauAxisBottom.tickValues = undefined;
-        // Remove format reset
-        // dauAxisBottom.format = undefined;
-    }
+  const barFill = [
+    { match: { id: 'current' }, id: 'gradientCurrent' },
+    { match: { id: 'comparison' }, id: 'gradientComparison' },
+  ];
 
 
   return (
@@ -951,7 +983,7 @@ export default function DataOverviewPage() {
         {/* 1. 销售金额 */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">销售金额 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">销售金额</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {salesData && salesData.current && salesData.current.total_amount !== undefined ? (
                 <>
@@ -965,22 +997,27 @@ export default function DataOverviewPage() {
                 </>
               ) : (
                 <>
-                  ¥{dashboardData.totalSales.toLocaleString()}
-                  {isFinite(dashboardData.salesChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.salesChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.salesChange >= 0 ? '+' : ''}{dashboardData.salesChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
+                  暂无数据
                 </>
               )}
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-             {salesData && salesData.lineChartSalesData ? (
+             {selectedRange === 'today' && salesData && salesData.current ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-foreground mb-2">
+                    ¥{salesData.current.total_amount.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    今日销售金额
+                  </div>
+                </div>
+              </div>
+             ) : salesData && salesData.lineChartSalesData ? (
               <ResponsiveLine
                 key={`sales-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
-                {...dashboardData.commonLineProps}
+                {...commonLineProps}
                 data={salesData.lineChartSalesData}
                 colors={['#6366f1']} // 只保留当前数据的颜色
                 lineWidth={2}
@@ -1015,7 +1052,7 @@ export default function DataOverviewPage() {
                   format: () => '',  // 不显示各个日期刻度
                 }}
                 axisLeft={{
-                  ...dashboardData.commonLineProps.axisLeft,
+                  ...commonLineProps.axisLeft,
                   format: (v) => {
                     if (typeof v !== 'number') return String(v);
                     if (v >= 10000) {
@@ -1037,56 +1074,9 @@ export default function DataOverviewPage() {
                 )}
               />
              ) : (
-              <ResponsiveLine
-                key={`sales-line-${dashboardData.timeGranularity}`}
-                {...dashboardData.commonLineProps}
-                data={dashboardData.lineChartSalesData}
-                colors={['#6366f1']} // 只保留当前数据的颜色
-                lineWidth={2}
-                enablePoints={dashboardData.timeGranularity !== 'monthly'} // Hide points for monthly
-                pointSize={dashboardData.timeGranularity === 'hourly' ? 6 : 4}
-                pointBorderWidth={2}
-                pointBorderColor={{ from: 'serieColor' }}
-                pointLabelYOffset={-12}
-                useMesh={true}
-                enableGridX={false}
-                enableGridY={true}
-                xScale={salesXScale} // Use dynamic scale type
-                xFormat={dashboardData.timeGranularity === 'hourly' ? undefined :
-                        "time:%Y-%m-%d" // Nivo can parse Date objects directly, format mostly for tooltip
-                }
-                yScale={{ type: 'linear', min: 0, max: salesYScaleMax }} // Use calculated max
-                axisBottom={{ 
-                  tickSize: 0,
-                  tickPadding: 10,
-                  tickRotation: 0,
-                  legend: `查询时间范围: ${formatDate(dateRange.from)} 至 ${formatDate(dateRange.to)}`,
-                  legendPosition: 'middle',
-                  legendOffset: 40,
-                  format: () => '',  // 不显示各个日期刻度
-                }}
-                axisLeft={{
-                  ...dashboardData.commonLineProps.axisLeft,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      const valueInWan = v / 10000;
-                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1); 
-                      return `${formattedValue}万`;
-                    } else if (v >= 1000) {
-                      const valueInQian = v / 1000;
-                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
-                      return `${formattedValue}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                tooltip={({ point }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    {point.data.yFormatted.toLocaleString()}
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无销售数据
+              </div>
              )}
           </CardContent>
         </Card>
@@ -1095,7 +1085,7 @@ export default function DataOverviewPage() {
         <Card>
           <CardHeader>
              {/* Update title/comparison label */}
-            <CardTitle className="text-sm font-medium text-muted-foreground">订单数量 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">订单数量</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {salesData && salesData.current && salesData.current.orders_count !== undefined ? (
                 <>
@@ -1109,13 +1099,7 @@ export default function DataOverviewPage() {
                 </>
               ) : (
                 <>
-                  {dashboardData.totalOrders.toLocaleString()}
-                  {isFinite(dashboardData.ordersChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.ordersChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.ordersChange >= 0 ? '+' : ''}{dashboardData.ordersChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
+                  暂无数据
                 </>
               )}
             </CardDescription>
@@ -1123,12 +1107,12 @@ export default function DataOverviewPage() {
           <CardContent className="h-64">
              {salesData && salesData.combinedOrdersData ? (
                <ResponsiveBar
-                 {...dashboardData.commonBarProps}
+                 {...commonBarProps}
                  data={salesData.combinedOrdersData}
                  keys={['current', 'comparison']}
                  indexBy="country"
-                 defs={dashboardData.gradientDefs}
-                 fill={dashboardData.barFill}
+                 defs={gradientDefs}
+                 fill={barFill}
                  enableLabel={false}
                  minValue={0}
                  margin={{ top: 20, right: 20, bottom: 40, left: 40 }}
@@ -1154,27 +1138,9 @@ export default function DataOverviewPage() {
                  )}
                />
              ) : (
-               <ResponsiveBar
-                 {...dashboardData.commonBarProps}
-                 data={dashboardData.combinedOrdersData}
-                 keys={['current', 'comparison']}
-                 indexBy="country"
-                 defs={dashboardData.gradientDefs}
-                 fill={dashboardData.barFill}
-                 enableLabel={false}
-                 minValue={0}
-                 margin={{ top: 20, right: 20, bottom: 40, left: 40 }}
-                 axisBottom={{
-                   ...dashboardData.commonBarProps.axisBottom,
-                   tickRotation: -45,
-                   legendOffset: 32
-                 }}
-                 tooltip={({ id, value, indexValue }) => (
-                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                     {value.toLocaleString()}
-                   </div>
-                 )}
-               />
+               <div className="flex items-center justify-center h-full text-gray-400">
+                 暂无订单数据
+               </div>
              )}
           </CardContent>
         </Card>
@@ -1183,7 +1149,7 @@ export default function DataOverviewPage() {
         <Card>
           <CardHeader>
              {/* Update title/comparison label */}
-             <CardTitle className="text-sm font-medium text-muted-foreground">客单价 ({dashboardData.currentLabel})</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">客单价</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
                {salesData && salesData.current && salesData.current.ave_amount !== undefined ? (
                  <>
@@ -1197,13 +1163,7 @@ export default function DataOverviewPage() {
                  </>
                ) : (
                  <>
-                   ¥{dashboardData.averageOrderValue.toFixed(2)}
-                   {isFinite(dashboardData.aovChange) && (
-                     <span className={`ml-2 text-xs font-medium ${dashboardData.aovChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                       {dashboardData.aovChange >= 0 ? '+' : ''}{dashboardData.aovChange.toFixed(1)}%
-                       <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                     </span>
-                   )}
+                   暂无数据
                  </>
                )}
              </CardDescription>
@@ -1211,18 +1171,18 @@ export default function DataOverviewPage() {
           <CardContent className="h-64">
              {salesData && salesData.combinedAovData ? (
                <ResponsiveBar
-                 {...dashboardData.commonBarProps}
+                 {...commonBarProps}
                  data={salesData.combinedAovData}
                  keys={['current', 'comparison']}
                  indexBy="label"
                  margin={{ top: 10, right: 10, bottom: 40, left: 10 }}
                  padding={0.3}
-                 defs={dashboardData.gradientDefs}
-                 fill={dashboardData.barFill}
+                 defs={gradientDefs}
+                 fill={barFill}
                  axisTop={null}
                  axisRight={null}
                  axisBottom={{
-                   ...dashboardData.commonBarProps.axisBottom,
+                   ...commonBarProps.axisBottom,
                    tickSize: 5,
                    tickPadding: 5,
                    tickRotation: 0,
@@ -1236,31 +1196,9 @@ export default function DataOverviewPage() {
                  )}
                />
              ) : (
-               <ResponsiveBar
-                 {...dashboardData.commonBarProps}
-                 data={dashboardData.combinedAovData}
-                 keys={['current', 'comparison']}
-                 indexBy="label"
-                 margin={{ top: 10, right: 10, bottom: 40, left: 10 }}
-                 padding={0.3}
-                 defs={dashboardData.gradientDefs}
-                 fill={dashboardData.barFill}
-                 axisTop={null}
-                 axisRight={null}
-                 axisBottom={{
-                   ...dashboardData.commonBarProps.axisBottom,
-                   tickSize: 5,
-                   tickPadding: 5,
-                   tickRotation: 0,
-                 }}
-                 enableLabel={false}
-                 enableGridY={false}
-                 tooltip={({ id, value, indexValue }) => (
-                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                     ¥{typeof value === 'number' ? value.toFixed(2) : value}
-                   </div>
-                 )}
-               />
+               <div className="flex items-center justify-center h-full text-gray-400">
+                 暂无客单价数据
+               </div>
              )}
           </CardContent>
         </Card>
@@ -1269,7 +1207,7 @@ export default function DataOverviewPage() {
         <Card>
           <CardHeader>
              {/* Update title/comparison label */}
-             <CardTitle className="text-sm font-medium text-muted-foreground">活跃用户 ({dashboardData.currentLabel})</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">活跃用户</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
                {activeUsersData && activeUsersData.current ? (
                  <>
@@ -1283,114 +1221,92 @@ export default function DataOverviewPage() {
                  </>
                ) : (
                  <>
-                   {dashboardData.totalDAU.toLocaleString()}
-                   {isFinite(dashboardData.dauChange) && (
-                     <span className={`ml-2 text-xs font-medium ${dashboardData.dauChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                       {dashboardData.dauChange >= 0 ? '+' : ''}{dashboardData.dauChange.toFixed(1)}%
-                       <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                     </span>
-                   )}
+                   暂无数据
                  </>
                )}
              </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
              {/* 使用真实API数据或降级到模拟数据 */}
-             {activeUsersData && activeUsersData.current && activeUsersData.current.daily_data ? (
-               <ResponsiveBar
-                 {...dashboardData.commonBarProps}
-                 data={(() => {
-                   // 转换API数据为图表格式
-                   const currentData = activeUsersData.current.daily_data || [];
-                   const previousData = activeUsersData.previous.daily_data || [];
-                   
-                   // 对于大于30天的数据，按周聚合显示
-                   if (currentData.length > 30) {
-                     const weeklyData = [];
-                     for (let i = 0; i < currentData.length; i += 7) {
-                       const weekData = currentData.slice(i, i + 7);
-                       const weekPreviousData = previousData.slice(i, i + 7);
-                       const weekStart = new Date(weekData[0].date);
-                       const weekSum = weekData.reduce((sum, day) => sum + day.active_users, 0);
-                       const weekPreviousSum = weekPreviousData.reduce((sum, day) => sum + (day?.active_users || 0), 0);
-                       
-                       weeklyData.push({
-                         timeBlock: `${weekStart.getMonth() + 1}/${weekStart.getDate()}`,
-                         current: weekSum,
-                         comparison: weekPreviousSum
-                       });
-                     }
-                     return weeklyData;
+             {selectedRange === 'today' && activeUsersData && activeUsersData.current ? (
+               <div className="flex items-center justify-center h-full">
+                 <div className="text-center">
+                   <div className="text-4xl font-bold text-foreground mb-2">
+                     {activeUsersData.current.active_users.toLocaleString()}
+                   </div>
+                   <div className="text-sm text-muted-foreground">
+                     今日活跃用户
+                   </div>
+                 </div>
+               </div>
+             ) : activeUsersData && activeUsersData.current && activeUsersData.current.daily_data ? (
+               <ResponsiveLine
+                 key={`active-users-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
+                 {...commonLineProps}
+                 data={[
+                   {
+                     id: 'current',
+                     data: activeUsersData.current.daily_data.map(item => ({
+                       x: new Date(item.date),
+                       y: item.active_users
+                     }))
                    }
-                   
-                   return currentData.map((item, index) => ({
-                     timeBlock: item.date,
-                     current: item.active_users,
-                     comparison: previousData[index]?.active_users || 0
-                   }));
-                 })()}
-                 keys={['current', 'comparison']}
-                 indexBy="timeBlock"
-                 defs={dashboardData.gradientDefs}
-                 fill={dashboardData.barFill}
-                 axisBottom={{
-                   tickSize: 5,
-                   tickPadding: 5,
-                   tickRotation: -45,
-                   tickValues: (() => {
-                     const data = activeUsersData.current.daily_data || [];
-                     // 大于30天的数据显示较少的标签
-                     if (data.length > 30) {
-                       const step = Math.ceil(data.length / 180 * 7); // 每周显示一个标签
-                       return data
-                         .filter((_, index) => index % step === 0)
-                         .map(item => {
-                           const date = new Date(item.date);
-                           return `${date.getMonth() + 1}/${date.getDate()}`;
-                         });
-                     }
-                     // 少于30天显示所有标签
-                     return data.map(item => item.date);
-                   })(),
-                   format: (value) => {
-                     if (typeof value === 'string' && value.includes('/')) {
-                       return value; // 已经格式化过的日期
-                     }
-                     const date = new Date(value);
-                     return `${date.getMonth() + 1}/${date.getDate()}`;
-                   }
+                 ]}
+                 colors={['#6366f1']} // 只保留当前数据的颜色
+                 lineWidth={2}
+                 enablePoints={true}
+                 pointSize={4}
+                 pointBorderWidth={2}
+                 pointBorderColor={{ from: 'serieColor' }}
+                 pointLabelYOffset={-12}
+                 useMesh={true}
+                 enableGridX={false}
+                 enableGridY={true}
+                 xScale={{ 
+                   type: 'time',
+                   precision: 'day'
                  }}
-                 enableLabel={false}
-                 labelSkipWidth={16}
-                 tooltip={({ id, value, indexValue }) => (
+                 xFormat="time:%Y-%m-%d"
+                 yScale={{ 
+                   type: 'linear', 
+                   min: 0, 
+                   max: 'auto'
+                 }}
+                 axisBottom={{
+                   tickSize: 0,
+                   tickPadding: 10,
+                   tickRotation: 0,
+                   legend: `${formatDate(dateRange.from)} - ${formatDate(dateRange.to)}`,
+                   legendPosition: 'middle',
+                   legendOffset: 20,
+                   format: () => '',  // 不显示各个日期刻度
+                 }}
+                 axisLeft={{
+                   ...commonLineProps.axisLeft,
+                   format: (v) => {
+                     if (typeof v !== 'number') return String(v);
+                     if (v >= 10000) {
+                       const valueInWan = v / 10000;
+                       const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
+                       return `${formattedValue}万`;
+                     } else if (v >= 1000) {
+                       const valueInQian = v / 1000;
+                       const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
+                       return `${formattedValue}千`;
+                     }
+                     return String(v);
+                   },
+                 }}
+                 tooltip={({ point }) => (
                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                     <strong>{typeof indexValue === 'string' && indexValue.includes('/') ? indexValue : (() => {
-                       const date = new Date(indexValue);
-                       return `${date.getMonth() + 1}/${date.getDate()}`;
-                     })()}</strong><br />
-                     {id === 'current' ? '当前' : '对比'}: {value.toLocaleString()}
+                     <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'} 用户
                    </div>
                  )}
                />
              ) : (
-               <ResponsiveBar
-                 {...dashboardData.commonBarProps}
-                 data={dashboardData.combinedDauData}
-                 keys={['current', 'comparison']}
-                 indexBy="timeBlock"
-                 defs={dashboardData.gradientDefs}
-                 fill={dashboardData.barFill}
-                 axisBottom={{
-                   ...dauAxisBottom,
-                 }}
-                 enableLabel={false}
-                 labelSkipWidth={16}
-                 tooltip={({ id, value, indexValue }) => (
-                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                         {value.toLocaleString()}
-                   </div>
-                 )}
-               />
+               <div className="flex items-center justify-center h-full text-gray-400">
+                 暂无活跃用户数据
+               </div>
              )}
           </CardContent>
         </Card>
@@ -1399,7 +1315,7 @@ export default function DataOverviewPage() {
         <Card>
           <CardHeader>
              {/* Update title/comparison label */}
-             <CardTitle className="text-sm font-medium text-muted-foreground">转化率 ({dashboardData.currentLabel})</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">转化率</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
                {funnelData && funnelData.current && funnelData.current.funnel_steps && funnelData.current.funnel_steps.length > 0 ? (
                  <>
@@ -1425,13 +1341,7 @@ export default function DataOverviewPage() {
                  </>
                ) : (
                  <>
-                   {dashboardData.conversionRate.toFixed(1)}%
-                   {isFinite(dashboardData.conversionChange) && (
-                     <span className={`ml-2 text-xs font-medium ${dashboardData.conversionChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                       {dashboardData.conversionChange >= 0 ? '+' : ''}{dashboardData.conversionChange.toFixed(1)}%
-                       <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                     </span>
-                   )}
+                   暂无数据
                  </>
                )}
              </CardDescription>
@@ -1470,31 +1380,9 @@ export default function DataOverviewPage() {
                 }
               />
             ) : (
-                             <ResponsiveFunnel
-                 data={dashboardData.conversionFunnelData as any} // Use type assertion
-                 margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-                 valueFormat={value => `${value}%`}
-                 colors={['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff']}
-                 borderWidth={2}
-                 labelColor={{ from: 'color', modifiers: [['darker', 3]] }}
-                 enableLabel={true}
-                 beforeSeparatorLength={20}
-                beforeSeparatorOffset={10}
-                afterSeparatorLength={20}
-                afterSeparatorOffset={10}
-                currentPartSizeExtension={10}
-                currentBorderWidth={5}
-                animate={true}
-                motionConfig="gentle"
-                isInteractive={true}
-                tooltip={({ part }) => {
-                    return (
-                      <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                        <strong>{part.data.id}</strong>: {part.data.value}%
-                      </div>
-                    )}
-                }
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无转化数据
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1502,7 +1390,7 @@ export default function DataOverviewPage() {
         {/* 6. 平均会话时间 */}
         <Card>
           <CardHeader>
-             <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时间 ({dashboardData.currentLabel})</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时间</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
                {sessionData && sessionData.current ? (
                  <>
@@ -1522,7 +1410,7 @@ export default function DataOverviewPage() {
           <CardContent className="h-64">
             {sessionData && sessionData.current ? (
               <ResponsiveBar
-                {...dashboardData.commonBarProps}
+                {...commonBarProps}
                 data={[
                   {
                     metric: '会话数',
@@ -1539,8 +1427,8 @@ export default function DataOverviewPage() {
                 indexBy="metric"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
-                defs={dashboardData.gradientDefs}
-                fill={dashboardData.barFill}
+                defs={gradientDefs}
+                fill={barFill}
                 axisBottom={{
                   tickSize: 5,
                   tickPadding: 5,
@@ -1585,11 +1473,102 @@ export default function DataOverviewPage() {
           <CardHeader>
             <CardTitle className="text-sm font-medium text-muted-foreground">商品购买数量</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              暂无数据
+              {itemsSoldData && itemsSoldData.current && itemsSoldData.current.total_items_sold !== undefined ? (
+                <>
+                  {itemsSoldData.current.total_items_sold.toLocaleString()}
+                  {itemsSoldData.comparison && isFinite(itemsSoldData.comparison.total_items_sold_change) && (
+                    <span className={`ml-2 text-xs font-medium ${itemsSoldData.comparison.total_items_sold_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {itemsSoldData.comparison.total_items_sold_change >= 0 ? '+' : ''}{itemsSoldData.comparison.total_items_sold_change.toFixed(1)}%
+                      <span className="text-muted-foreground text-xs ml-1">(环比)</span>
+                    </span>
+                  )}
+                </>
+              ) : (
+                '暂无数据'
+              )}
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-64 flex items-center justify-center text-gray-400">
-            暂无商品购买数据
+          <CardContent className="h-64">
+            {selectedRange === 'today' && itemsSoldData && itemsSoldData.current ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-foreground mb-2">
+                    {itemsSoldData.current.total_items_sold.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    今日商品销量
+                  </div>
+                </div>
+              </div>
+            ) : itemsSoldData && itemsSoldData.current && itemsSoldData.current.daily_data ? (
+              <ResponsiveLine
+                key={`items-sold-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
+                {...commonLineProps}
+                data={[
+                  {
+                    id: 'current',
+                    data: itemsSoldData.current.daily_data.map(item => ({
+                      x: new Date(item.date),
+                      y: item.total_items_sold
+                    }))
+                  }
+                ]}
+                colors={['#6366f1']} // 只保留当前数据的颜色
+                lineWidth={2}
+                enablePoints={true}
+                pointSize={4}
+                pointBorderWidth={2}
+                pointBorderColor={{ from: 'serieColor' }}
+                pointLabelYOffset={-12}
+                useMesh={true}
+                enableGridX={false}
+                enableGridY={true}
+                xScale={{ 
+                  type: 'time',
+                  precision: 'day'
+                }}
+                xFormat="time:%Y-%m-%d"
+                yScale={{ 
+                  type: 'linear', 
+                  min: 0, 
+                  max: 'auto'
+                }}
+                axisBottom={{
+                  tickSize: 0,
+                  tickPadding: 10,
+                  tickRotation: 0,
+                  legend: `${formatDate(dateRange.from)} - ${formatDate(dateRange.to)}`,
+                  legendPosition: 'middle',
+                  legendOffset: 20,
+                  format: () => '',  // 不显示各个日期刻度
+                }}
+                axisLeft={{
+                  ...commonLineProps.axisLeft,
+                  format: (v) => {
+                    if (typeof v !== 'number') return String(v);
+                    if (v >= 10000) {
+                      const valueInWan = v / 10000;
+                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
+                      return `${formattedValue}万`;
+                    } else if (v >= 1000) {
+                      const valueInQian = v / 1000;
+                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
+                      return `${formattedValue}千`;
+                    }
+                    return String(v);
+                  },
+                }}
+                tooltip={({ point }) => (
+                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                    <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'} 件
+                  </div>
+                )}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无商品购买数据
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -1597,7 +1576,7 @@ export default function DataOverviewPage() {
         <Card>
           <CardHeader>
             {/* Update title/comparison label */}
-            <CardTitle className="text-sm font-medium text-muted-foreground">页面浏览量 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">页面浏览量</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {pageViewsData && pageViewsData.current ? (
                 <>
@@ -1611,13 +1590,7 @@ export default function DataOverviewPage() {
                 </>
               ) : (
                 <>
-                  {dashboardData.totalPageViews.toLocaleString()}
-                  {isFinite(dashboardData.pageViewsChange) && (
-                    <span className={`ml-2 text-xs font-medium ${dashboardData.pageViewsChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {dashboardData.pageViewsChange >= 0 ? '+' : ''}{dashboardData.pageViewsChange.toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
+                  暂无数据
                 </>
               )}
             </CardDescription>
@@ -1625,7 +1598,7 @@ export default function DataOverviewPage() {
           <CardContent className="h-64">
             {pageViewsData && pageViewsData.current && pageViewsData.current.pages ? (
               <ResponsiveBar
-                {...dashboardData.commonBarProps}
+                {...commonBarProps}
                 data={(() => {
                   // 转换API数据为图表格式
                   const currentPages = pageViewsData.current.pages;
@@ -1645,8 +1618,8 @@ export default function DataOverviewPage() {
                 indexBy="page"
                 margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
                 padding={0.3}
-                defs={dashboardData.gradientDefs}
-                fill={dashboardData.barFill}
+                defs={gradientDefs}
+                fill={barFill}
                 axisBottom={{
                   tickSize: 5,
                   tickPadding: 5,
@@ -1672,7 +1645,7 @@ export default function DataOverviewPage() {
         <Card>
           <CardHeader>
              {/* Update title/comparison label */}
-             <CardTitle className="text-sm font-medium text-muted-foreground">搜索次数 ({dashboardData.currentLabel})</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">搜索次数</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
                {searchStatsData && searchStatsData.current ? (
                  <>
@@ -1686,13 +1659,7 @@ export default function DataOverviewPage() {
                  </>
                ) : (
                  <>
-                   {dashboardData.totalSearches.toLocaleString()}
-                   {isFinite(dashboardData.searchesChange) && (
-                     <span className={`ml-2 text-xs font-medium ${dashboardData.searchesChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                       {dashboardData.searchesChange >= 0 ? '+' : ''}{dashboardData.searchesChange.toFixed(1)}%
-                       <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                     </span>
-                   )}
+                   暂无数据
                  </>
                )}
              </CardDescription>
@@ -1700,7 +1667,7 @@ export default function DataOverviewPage() {
           <CardContent className="h-64 flex items-center justify-center text-gray-400">
             {searchStatsData && searchStatsData.current && searchStatsData.current.top_keywords ? (
                 <div className="text-xs w-full px-4">
-                    <p className="font-semibold mb-2 text-center">热门搜索词 ({dashboardData.currentLabel} vs {dashboardData.comparisonLabel})</p>
+                    <p className="font-semibold mb-2 text-center">热门搜索词</p>
                      <ul>
                          {searchStatsData.current.top_keywords.slice(0, 5).map((keyword) => {
                            // 在对比时间段中查找相同的关键词
