@@ -23,16 +23,167 @@ import {
 
 // Import the data generation function and type
 import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
+import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
+
+// 定义转化漏斗数据接口
+interface FunnelStepData {
+  step: string;
+  users: number;
+  conversion_rate: string;
+}
+
+interface FunnelData {
+  funnel_steps: FunnelStepData[];
+  start_date: string;
+  end_date: string;
+}
+
+interface FunnelComparisonData {
+  current: FunnelData;
+  previous: FunnelData;
+  comparison: {
+    steps: Array<{
+      step: string;
+      change_rate: number;
+      change_amount: number;
+    }>;
+  };
+}
 
 export default function ConversionPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  // 新增转化漏斗数据状态
+  const [funnelData, setFunnelData] = useState<FunnelComparisonData | null>(null);
+  // 新增日期范围选择状态
+  const today = new Date();
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  const [dateRange, setDateRange] = useState<DateRange>({from: thirtyDaysAgo, to: today});
+  // 新增错误状态
+  const [error, setError] = useState<string | null>(null);
+
+  // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
+  const formatDate = (date: Date): string => {
+    try {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    } catch (err) {
+      console.error('格式化日期错误:', err);
+      // 返回一个备用格式
+      return date.toISOString().split('T')[0];
+    }
+  };
+
+  // 获取后端转化漏斗数据
+  const fetchFunnelData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/traffic/conversion-funnel/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求转化漏斗数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析转化漏斗数据JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('转化漏斗数据:', data);
+      
+      // 检查数据格式
+      const isValidData = data && typeof data === 'object' && 'current' in data && 'previous' in data && 'comparison' in data;
+      
+      if (isValidData) {
+        setFunnelData(data);
+      } else {
+        console.log('转化漏斗数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取转化漏斗数据错误:', err);
+    }
+  };
+
+  // 处理转化漏斗数据转换为Nivo格式
+  const processFunnelData = (data: FunnelComparisonData) => {
+    if (!data || !data.current || !data.current.funnel_steps) return null;
+    
+    // 转换API数据为Nivo漏斗图格式
+    return data.current.funnel_steps.map((step, index) => {
+      // 计算转化率百分比
+      let conversionRate: number;
+      if (step.conversion_rate === '-' || step.conversion_rate === '') {
+        // 第一步默认为100%
+        conversionRate = 100;
+      } else {
+        // 移除百分号并转换为数字
+        conversionRate = parseFloat(step.conversion_rate.replace('%', ''));
+      }
+      
+      return {
+        id: step.step.replace(/^\d+\./, ''), // 移除步骤前面的数字前缀
+        value: conversionRate,
+        label: `${conversionRate}%`
+      };
+    });
+  };
+
+  // 从转化漏斗数据中提取卡片数据
+  const getFunnelCardsData = () => {
+    if (!funnelData || !funnelData.current || !funnelData.current.funnel_steps) {
+      // 返回默认数据
+      return [
+        { title: '访问商品页', rate: 0, change: 0 },
+        { title: '浏览商品详情', rate: 0, change: 0 },
+        { title: '添加购物车', rate: 0, change: 0 },
+        { title: '进入结算', rate: 0, change: 0 },
+        { title: '支付完成', rate: 0, change: 0 }
+      ];
+    }
+
+    return funnelData.current.funnel_steps.map((step, index) => {
+      const currentRate = step.conversion_rate === '-' || step.conversion_rate === '' 
+        ? 100 
+        : parseFloat(step.conversion_rate.replace('%', ''));
+      
+      // 从比较数据中获取变化率
+      const comparison = funnelData.comparison?.steps?.find(s => s.step === step.step);
+      const changeRate = comparison ? comparison.change_rate : 0;
+      
+      return {
+        title: step.step.replace(/^\d+\./, ''), // 移除步骤前面的数字前缀
+        rate: currentRate,
+        change: changeRate
+      };
+    });
+  };
 
   useEffect(() => {
     // Generate data dynamically using the imported function
     const generatedData = generateDataForRange(selectedRange);
     setDashboardData(generatedData);
-  }, [selectedRange]);
+    
+    // 获取转化漏斗数据
+    if (dateRange.from && dateRange.to) {
+      fetchFunnelData(dateRange.from, dateRange.to);
+    }
+  }, [selectedRange, dateRange]);
 
   if (!dashboardData) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
@@ -189,60 +340,23 @@ export default function ConversionPage() {
       </div>
 
       {/* Conversion Overview Section */}
-      <div className="grid gap-4 md:grid-cols-4 mb-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">整体转化率 ({dashboardData.currentLabel})</CardTitle>
-            <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {dashboardData.conversionRate.toFixed(1)}%
-              {isFinite(dashboardData.conversionChange) && (
-                <span className={`ml-2 text-xs font-medium ${dashboardData.conversionChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {dashboardData.conversionChange >= 0 ? '+' : ''}{dashboardData.conversionChange.toFixed(1)}%
-                  <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                </span>
-              )}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">订单转化率 ({dashboardData.currentLabel})</CardTitle>
-            <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {((dashboardData.totalOrders / dashboardData.totalDAU) * 100).toFixed(1)}%
-              <span className={`ml-2 text-xs font-medium ${dashboardData.ordersChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {dashboardData.ordersChange >= 0 ? '+' : ''}{dashboardData.ordersChange.toFixed(1)}%
-                <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-              </span>
-            </CardDescription>
-          </CardHeader>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">浏览商品转化率 ({dashboardData.currentLabel})</CardTitle>
-            <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {Math.round(28 + (Math.random() * 5))}%
-              <span className={`ml-2 text-xs font-medium ${Math.random() > 0.5 ? 'text-green-600' : 'text-red-600'}`}>
-                {Math.random() > 0.5 ? '+' : ''}{(Math.random() * 5).toFixed(1)}%
-                <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-              </span>
-            </CardDescription>
-          </CardHeader>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">加购转化率 ({dashboardData.currentLabel})</CardTitle>
-            <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {Math.round(20 + (Math.random() * 5))}%
-              <span className={`ml-2 text-xs font-medium ${Math.random() > 0.5 ? 'text-green-600' : 'text-red-600'}`}>
-                {Math.random() > 0.5 ? '+' : ''}{(Math.random() * 5).toFixed(1)}%
-                <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-              </span>
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-5 mb-6">
+        {getFunnelCardsData().map((cardData, index) => (
+          <Card key={index}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">{cardData.title} ({dashboardData.currentLabel})</CardTitle>
+              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
+                {cardData.rate.toFixed(1)}%
+                {isFinite(cardData.change) && (
+                  <span className={`ml-2 text-xs font-medium ${cardData.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {cardData.change >= 0 ? '+' : ''}{cardData.change.toFixed(1)}%
+                    <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
+                  </span>
+                )}
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ))}
       </div>
 
       {/* Detailed Conversion Visualizations */}
@@ -254,7 +368,7 @@ export default function ConversionPage() {
           </CardHeader>
           <CardContent className="h-80">
             <ResponsiveFunnel
-              data={dashboardData.conversionFunnelData}
+              data={funnelData ? processFunnelData(funnelData) : dashboardData.conversionFunnelData}
               margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
               valueFormat={value => `${value}%`}
               colors={['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff']}
@@ -503,54 +617,6 @@ export default function ConversionPage() {
           </CardContent>
         </Card>
 
-        {/* 6. Conversion Improvement Opportunities */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">转化率优化建议</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="border rounded-lg p-4 hover:bg-gray-50">
-                <h3 className="text-sm font-medium mb-2">产品详情页优化</h3>
-                <div className="text-sm text-muted-foreground">
-                  <p className="mb-2">产品详情页跳出率较高，建议优化以下方面：</p>
-                  <ul className="list-disc pl-4 space-y-1">
-                    <li>添加更多产品图片</li>
-                    <li>优化产品描述</li>
-                    <li>突出用户评价</li>
-                  </ul>
-                  <p className="text-xs mt-2 text-green-600">预计提升转化率：1.5%</p>
-                </div>
-              </div>
-              
-              <div className="border rounded-lg p-4 hover:bg-gray-50">
-                <h3 className="text-sm font-medium mb-2">结算流程简化</h3>
-                <div className="text-sm text-muted-foreground">
-                  <p className="mb-2">从购物车到下单流程中流失较多，建议：</p>
-                  <ul className="list-disc pl-4 space-y-1">
-                    <li>减少结账步骤</li>
-                    <li>提供游客结账选项</li>
-                    <li>优化表单体验</li>
-                  </ul>
-                  <p className="text-xs mt-2 text-green-600">预计提升转化率：2.1%</p>
-                </div>
-              </div>
-              
-              <div className="border rounded-lg p-4 hover:bg-gray-50">
-                <h3 className="text-sm font-medium mb-2">社交媒体流量转化</h3>
-                <div className="text-sm text-muted-foreground">
-                  <p className="mb-2">社交媒体访客转化率较低，建议：</p>
-                  <ul className="list-disc pl-4 space-y-1">
-                    <li>针对性着陆页设计</li>
-                    <li>社交媒体专属优惠</li>
-                    <li>简化注册流程</li>
-                  </ul>
-                  <p className="text-xs mt-2 text-green-600">预计提升转化率：1.8%</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

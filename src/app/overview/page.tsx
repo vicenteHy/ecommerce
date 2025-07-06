@@ -206,6 +206,25 @@ interface FunnelComparisonData {
   };
 }
 
+// 定义会话数据接口
+interface SessionData {
+  session_count: number;
+  avg_session_duration_seconds: number;
+  start_date: string;
+  end_date: string;
+}
+
+interface SessionComparisonData {
+  current: SessionData;
+  previous: SessionData;
+  comparison: {
+    session_count_change_rate: number;
+    session_count_change_amount: number;
+    duration_change_rate: number;
+    duration_change_amount: number;
+  };
+}
+
 // --- Page Component ---
 export default function DataOverviewPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
@@ -221,6 +240,8 @@ export default function DataOverviewPage() {
   const [pageViewsData, setPageViewsData] = useState<PageViewsComparisonData | null>(null);
   // 新增转化漏斗数据状态
   const [funnelData, setFunnelData] = useState<FunnelComparisonData | null>(null);
+  // 新增会话数据状态
+  const [sessionData, setSessionData] = useState<SessionComparisonData | null>(null);
   // 新增日期范围选择状态
   // 设置默认日期范围：今天往前推30天
   const today = new Date();
@@ -230,15 +251,25 @@ export default function DataOverviewPage() {
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
-  // 格式化日期为 YYYY-MM-DD 格式
+  // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
   const formatDate = (date: Date): string => {
     try {
-      return format(date, 'yyyy-MM-dd');
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     } catch (err) {
       console.error('格式化日期错误:', err);
       // 返回一个备用格式
       return date.toISOString().split('T')[0];
     }
+  };
+
+  // 格式化秒数为分钟:秒格式
+  const formatDuration = (seconds: number): string => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
   
   // 处理销售数据和图表数据转换
@@ -456,6 +487,49 @@ export default function DataOverviewPage() {
     }
   };
 
+  // 获取后端会话数据
+  const fetchSessionData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/traffic/sessions/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求会话数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析会话数据JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('会话数据:', data);
+      
+      // 检查数据格式
+      const isValidData = data && typeof data === 'object' && 'current' in data && 'previous' in data && 'comparison' in data;
+      
+      if (isValidData) {
+        setSessionData(data);
+      } else {
+        console.log('会话数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取会话数据错误:', err);
+    }
+  };
+
   // 获取后端活跃用户数据
   const fetchActiveUsersData = async (from: Date, to: Date) => {
     try {
@@ -595,26 +669,28 @@ export default function DataOverviewPage() {
     const generatedData = generateDataForRange(selectedRange);
     setDashboardData(generatedData);
     
-    // 根据选择的范围设置日期
-    const today = new Date();
-    let from = new Date(today);
-    let to = new Date(today);
+    // 根据选择的范围设置日期（UTC时区）
+    const now = new Date();
+    let from = new Date();
+    let to = new Date();
     
     switch (selectedRange) {
       case 'last_7_days':
-        from.setDate(today.getDate() - 6);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       case 'last_30_days':
-        from.setDate(today.getDate() - 29);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       case 'last_6_months':
-        from.setMonth(today.getMonth() - 5);
-        from.setDate(1);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       default: // 'today'
-        // 对于今天，使用今天的0点到23:59
-        from = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-        to = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+        // 对于今天，使用今天的UTC 0点到23:59
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
     }
     
@@ -625,6 +701,7 @@ export default function DataOverviewPage() {
     fetchSearchStatsData(from, to);
     fetchPageViewsData(from, to);
     fetchFunnelData(from, to);
+    fetchSessionData(from, to);
   }, [selectedRange]);
   
   // 处理日期范围变更
@@ -636,13 +713,28 @@ export default function DataOverviewPage() {
         return;
       }
       
+      // 将本地时间转换为UTC时间
+      const utcFrom = new Date(Date.UTC(
+        range.from.getFullYear(),
+        range.from.getMonth(),
+        range.from.getDate(),
+        0, 0, 0
+      ));
+      const utcTo = new Date(Date.UTC(
+        range.to.getFullYear(),
+        range.to.getMonth(),
+        range.to.getDate(),
+        23, 59, 59
+      ));
+      
       setDateRange(range);
       setError(null); // 清除之前的错误提示
-      fetchSalesData(range.from, range.to);
-      fetchActiveUsersData(range.from, range.to);
-      fetchSearchStatsData(range.from, range.to);
-      fetchPageViewsData(range.from, range.to);
-      fetchFunnelData(range.from, range.to);
+      fetchSalesData(utcFrom, utcTo);
+      fetchActiveUsersData(utcFrom, utcTo);
+      fetchSearchStatsData(utcFrom, utcTo);
+      fetchPageViewsData(utcFrom, utcTo);
+      fetchFunnelData(utcFrom, utcTo);
+      fetchSessionData(utcFrom, utcTo);
     }
   };
 
@@ -815,19 +907,16 @@ export default function DataOverviewPage() {
               }
               
               if (range.to > now) {
-                // 如果结束日期是未来，调整为今天
+                // 如果结束日期是未来，调整为今天（UTC时区）
                 const adjustedRange: DateRange = {
                   from: range.from,
-                  to: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
+                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
                 };
                 setDateRange(adjustedRange);
                 handleDateRangeChange(adjustedRange);
               } else {
                 // 发送请求
                 handleDateRangeChange(range);
-                fetchSearchStatsData(range.from, range.to);
-                fetchPageViewsData(range.from, range.to);
-                fetchFunnelData(range.from, range.to);
               }
             }}
           />
@@ -1348,17 +1437,16 @@ export default function DataOverviewPage() {
              </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {funnelData && funnelData.current && funnelData.current.funnel_steps ? (
-              <ResponsiveFunnel
-                data={processFunnelData(funnelData) as any}
-                margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-                valueFormat={value => `${value}%`}
-                colors={['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff']}
-                borderWidth={2}
-                labelColor={{ from: 'color', modifiers: [['darker', 3]] }}
-                enableLabel={true}
-                labelTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
-                beforeSeparatorLength={20}
+                         {funnelData && funnelData.current && funnelData.current.funnel_steps ? (
+               <ResponsiveFunnel
+                 data={processFunnelData(funnelData) as any}
+                 margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+                 valueFormat={value => `${value}%`}
+                 colors={['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff']}
+                 borderWidth={2}
+                 labelColor={{ from: 'color', modifiers: [['darker', 3]] }}
+                 enableLabel={true}
+                 beforeSeparatorLength={20}
                 beforeSeparatorOffset={10}
                 afterSeparatorLength={20}
                 afterSeparatorOffset={10}
@@ -1382,16 +1470,15 @@ export default function DataOverviewPage() {
                 }
               />
             ) : (
-              <ResponsiveFunnel
-                data={dashboardData.conversionFunnelData as any} // Use type assertion
-                margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-                valueFormat={value => `${value}%`}
-                colors={['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff']}
-                borderWidth={2}
-                labelColor={{ from: 'color', modifiers: [['darker', 3]] }}
-                enableLabel={true}
-                labelTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
-                beforeSeparatorLength={20}
+                             <ResponsiveFunnel
+                 data={dashboardData.conversionFunnelData as any} // Use type assertion
+                 margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+                 valueFormat={value => `${value}%`}
+                 colors={['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff']}
+                 borderWidth={2}
+                 labelColor={{ from: 'color', modifiers: [['darker', 3]] }}
+                 enableLabel={true}
+                 beforeSeparatorLength={20}
                 beforeSeparatorOffset={10}
                 afterSeparatorLength={20}
                 afterSeparatorOffset={10}
@@ -1412,87 +1499,97 @@ export default function DataOverviewPage() {
           </CardContent>
         </Card>
 
-        {/* 6. 平均停留时间 */}
+        {/* 6. 平均会话时间 */}
         <Card>
           <CardHeader>
-             {/* Update title/comparison label */}
-             <CardTitle className="text-sm font-medium text-muted-foreground">平均停留时间 ({dashboardData.currentLabel})</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时间 ({dashboardData.currentLabel})</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-               {dashboardData.avgTimeOnPage} 秒
-               {isFinite(dashboardData.timeOnPageChange) && (
-                 <span className={`ml-2 text-xs font-medium ${dashboardData.timeOnPageChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                   {dashboardData.timeOnPageChange >= 0 ? '+' : ''}{dashboardData.timeOnPageChange.toFixed(1)}%
-                   <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                 </span>
+               {sessionData && sessionData.current ? (
+                 <>
+                   {formatDuration(sessionData.current.avg_session_duration_seconds)}
+                   {sessionData.comparison && isFinite(sessionData.comparison.duration_change_rate) && (
+                     <span className={`ml-2 text-xs font-medium ${sessionData.comparison.duration_change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                       {sessionData.comparison.duration_change_rate >= 0 ? '+' : ''}{sessionData.comparison.duration_change_rate.toFixed(1)}%
+                       <span className="text-muted-foreground text-xs ml-1">(环比)</span>
+                     </span>
+                   )}
+                 </>
+               ) : (
+                 '暂无数据'
                )}
              </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-             {/* Use dashboardData for props */}
-             <ResponsiveBar
-               {...dashboardData.commonBarProps}
-               data={dashboardData.combinedTimeOnPageData} // Needs dynamic simulation
-               keys={['current', 'comparison']}
-               indexBy="page"
-               margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
-               padding={0.3}
-               defs={dashboardData.gradientDefs}
-               fill={dashboardData.barFill}
-               axisBottom={{
-                 tickSize: 5,
-                 tickPadding: 5,
-                 tickRotation: -45,
-               }}
-               enableLabel={false}
-               enableGridY={false}
-               tooltip={({ id, value, color, indexValue }) => ( // Use indexValue for page name
-                 <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                       {value}
-                 </div>
-               )}
-             />
+            {sessionData && sessionData.current ? (
+              <ResponsiveBar
+                {...dashboardData.commonBarProps}
+                data={[
+                  {
+                    metric: '会话数',
+                    current: sessionData.current.session_count,
+                    comparison: sessionData.previous.session_count
+                  },
+                  {
+                    metric: '平均时长(秒)',
+                    current: sessionData.current.avg_session_duration_seconds,
+                    comparison: sessionData.previous.avg_session_duration_seconds
+                  }
+                ]}
+                keys={['current', 'comparison']}
+                indexBy="metric"
+                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
+                padding={0.3}
+                defs={dashboardData.gradientDefs}
+                fill={dashboardData.barFill}
+                axisBottom={{
+                  tickSize: 5,
+                  tickPadding: 5,
+                  tickRotation: 0,
+                }}
+                axisLeft={{
+                  tickSize: 5,
+                  tickPadding: 5,
+                  tickRotation: 0,
+                  format: (value) => {
+                    if (typeof value !== 'number') return String(value);
+                    if (value >= 1000) {
+                      return `${(value / 1000).toFixed(1)}k`;
+                    }
+                    return String(Math.round(value));
+                  }
+                }}
+                enableLabel={false}
+                enableGridY={true}
+                enableGridX={false}
+                tooltip={({ id, value, indexValue }) => (
+                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                    <strong>{indexValue}</strong><br />
+                    {id === 'current' ? '当前' : '对比'}: {
+                      indexValue === '平均时长(秒)' 
+                        ? formatDuration(value) 
+                        : value.toLocaleString()
+                    }
+                  </div>
+                )}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无会话数据
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* 7. 商品购买数量 */}
         <Card>
           <CardHeader>
-            {/* Update title/comparison label */}
-            <CardTitle className="text-sm font-medium text-muted-foreground">商品购买数量 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">商品购买数量</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {dashboardData.totalItemsPurchased.toLocaleString()}
-              {isFinite(dashboardData.itemsPurchasedChange) && (
-                <span className={`ml-2 text-xs font-medium ${dashboardData.itemsPurchasedChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {dashboardData.itemsPurchasedChange >= 0 ? '+' : ''}{dashboardData.itemsPurchasedChange.toFixed(1)}%
-                  <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                </span>
-              )}
+              暂无数据
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-64">
-            {/* Use dashboardData for props */}
-            <ResponsiveBar
-              {...dashboardData.commonBarProps}
-              data={dashboardData.combinedItemsPurchasedData} // Needs dynamic simulation
-              keys={['current', 'comparison']}
-              indexBy="skuName"
-              margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
-              padding={0.3}
-              defs={dashboardData.gradientDefs}
-              fill={dashboardData.barFill}
-              axisBottom={{
-                tickSize: 5,
-                tickPadding: 5,
-                tickRotation: -45,
-              }}
-              enableLabel={false}
-              enableGridY={false}
-              tooltip={({ id, indexValue, value, color, data }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  {value.toLocaleString()}
-                </div>
-              )}
-            />
+          <CardContent className="h-64 flex items-center justify-center text-gray-400">
+            暂无商品购买数据
           </CardContent>
         </Card>
 
@@ -1564,28 +1661,9 @@ export default function DataOverviewPage() {
                 )}
               />
             ) : (
-              <ResponsiveBar
-                {...dashboardData.commonBarProps}
-                data={dashboardData.combinedPageViewsData} // Needs dynamic simulation
-                keys={['current', 'comparison']}
-                indexBy="page"
-                margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
-                padding={0.3}
-                defs={dashboardData.gradientDefs}
-                fill={dashboardData.barFill}
-                axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: -45,
-                }}
-                enableLabel={false}
-                enableGridY={false}
-                tooltip={({ id, value, color, indexValue }) => ( // Use indexValue for page name
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    {value.toLocaleString()}
-                  </div>
-                )}
-              />
+              <div className="flex items-center justify-center h-full text-gray-400">
+                暂无页面浏览量数据
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1620,7 +1698,6 @@ export default function DataOverviewPage() {
              </CardDescription>
           </CardHeader>
           <CardContent className="h-64 flex items-center justify-center text-gray-400">
-            {/* 使用真实API数据或降级到模拟数据 */}
             {searchStatsData && searchStatsData.current && searchStatsData.current.top_keywords ? (
                 <div className="text-xs w-full px-4">
                     <p className="font-semibold mb-2 text-center">热门搜索词 ({dashboardData.currentLabel} vs {dashboardData.comparisonLabel})</p>
@@ -1641,22 +1718,8 @@ export default function DataOverviewPage() {
                          })}
                      </ul>
                  </div>
-             ) : dashboardData.combinedSearchTermsData && dashboardData.combinedSearchTermsData.length > 0 ? (
-                <div className="text-xs w-full px-4">
-                    <p className="font-semibold mb-2 text-center">热门搜索词 ({dashboardData.currentLabel} vs {dashboardData.comparisonLabel})</p>
-                     <ul>
-                         {/* Assuming structure { term: string, today: number, yesterday: number } */}
-                         {dashboardData.combinedSearchTermsData.slice(0, 5).map((term: any) => (
-                             <li key={term.term} className="flex justify-between py-1 border-b border-dashed">
-                                 <span>{term.term}</span>
-                                  {/* Adapt keys based on potential simulation changes */}
-                                 <span>{term.current?.toLocaleString()} / <span className="text-muted-foreground">{term.comparison?.toLocaleString()}</span></span>
-                             </li>
-                         ))}
-                     </ul>
-                 </div>
              ) : (
-                 '搜索词数据待添加'
+                 '暂无搜索数据'
              )}
            </CardContent>
          </Card>

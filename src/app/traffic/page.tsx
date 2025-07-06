@@ -73,6 +73,17 @@ interface PageViewsComparisonData {
   };
 }
 
+// 定义设备类型数据接口
+interface DeviceTypeData {
+  total: number;
+  ios: number;
+  android: number;
+  ios_percentage: string;
+  android_percentage: string;
+  start_date: string;
+  end_date: string;
+}
+
 export default function TrafficPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -80,11 +91,16 @@ export default function TrafficPage() {
   const [activeUsersData, setActiveUsersData] = useState<ActiveUsersComparisonData | null>(null);
   // 新增页面浏览量数据状态
   const [pageViewsData, setPageViewsData] = useState<PageViewsComparisonData | null>(null);
+  // 新增设备类型数据状态
+  const [deviceTypeData, setDeviceTypeData] = useState<DeviceTypeData | null>(null);
 
-  // 格式化日期为 YYYY-MM-DD 格式
+  // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
   const formatDate = (date: Date): string => {
     try {
-      return format(date, 'yyyy-MM-dd');
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     } catch (err) {
       console.error('格式化日期错误:', err);
       return date.toISOString().split('T')[0];
@@ -177,36 +193,84 @@ export default function TrafficPage() {
     }
   };
 
+  // 获取后端设备类型数据
+  const fetchDeviceTypeData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/traffic/device-type?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求设备类型数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析设备类型数据JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('设备类型数据:', data);
+      
+      // 检查数据格式
+      const isValidData = data && typeof data === 'object' && 
+                         'total' in data && 'ios' in data && 'android' in data && 
+                         'ios_percentage' in data && 'android_percentage' in data;
+      
+      if (isValidData) {
+        setDeviceTypeData(data);
+      } else {
+        console.log('设备类型数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取设备类型数据错误:', err);
+    }
+  };
+
   useEffect(() => {
     // Generate data dynamically using the imported function
     const generatedData = generateDataForRange(selectedRange);
     setDashboardData(generatedData);
     
-    // 根据选择的范围设置日期
-    const today = new Date();
-    let from = new Date(today);
-    let to = new Date(today);
+    // 根据选择的范围设置日期（UTC时区）
+    const now = new Date();
+    let from = new Date();
+    let to = new Date();
     
     switch (selectedRange) {
       case 'last_7_days':
-        from.setDate(today.getDate() - 6);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       case 'last_30_days':
-        from.setDate(today.getDate() - 29);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       case 'last_6_months':
-        from.setMonth(today.getMonth() - 5);
-        from.setDate(1);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       default: // 'today'
-        // 对于今天，使用今天的0点到23:59
-        from = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-        to = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+        // 对于今天，使用今天的UTC 0点到23:59
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
     }
     
     fetchActiveUsersData(from, to);
     fetchPageViewsData(from, to);
+    fetchDeviceTypeData(from, to);
   }, [selectedRange]);
 
   if (!dashboardData) {
@@ -306,10 +370,24 @@ export default function TrafficPage() {
   ];
 
   // Create device distribution data
-  const deviceData = [
-    { id: '移动设备', label: '移动设备', value: 68, color: '#6366f1' },
-    { id: '桌面设备', label: '桌面设备', value: 27, color: '#a5b4fc' },
-    { id: '平板设备', label: '平板设备', value: 5, color: '#c7d2fe' },
+  const deviceData = deviceTypeData ? [
+    { 
+      id: 'iOS', 
+      label: 'iOS', 
+      value: parseFloat(deviceTypeData.ios_percentage.replace('%', '')), 
+      color: '#6366f1',
+      count: deviceTypeData.ios
+    },
+    { 
+      id: 'Android', 
+      label: 'Android', 
+      value: parseFloat(deviceTypeData.android_percentage.replace('%', '')), 
+      color: '#a5b4fc',
+      count: deviceTypeData.android
+    },
+  ] : [
+    { id: 'iOS', label: 'iOS', value: 21.56, color: '#6366f1', count: 0 },
+    { id: 'Android', label: 'Android', value: 66.59, color: '#a5b4fc', count: 0 },
   ];
 
   // Create browser distribution data
@@ -685,6 +763,7 @@ export default function TrafficPage() {
               arcLinkLabelsColor={{ from: 'color' }}
               arcLabelsSkipAngle={10}
               arcLabelsTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
+              arcLabel={d => `${d.value}%`}
               legends={[
                 {
                   anchor: 'right',
@@ -713,7 +792,8 @@ export default function TrafficPage() {
               tooltip={({ datum }) => (
                 <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
                   <strong>{datum.id}</strong><br />
-                  {datum.value}%
+                  {datum.value}%<br />
+                  数量: {datum.data.count?.toLocaleString() || 0}
                 </div>
               )}
             />

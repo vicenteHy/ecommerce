@@ -156,10 +156,13 @@ export default function SalesPage() {
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
-  // 格式化日期为 YYYY-MM-DD 格式
+  // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
   const formatDate = (date: Date): string => {
     try {
-      return format(date, 'yyyy-MM-dd');
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     } catch (err) {
       console.error('格式化日期错误:', err);
       // 返回一个备用格式
@@ -430,26 +433,28 @@ export default function SalesPage() {
     const generatedData = generateDataForRange(selectedRange);
     setDashboardData(generatedData);
     
-    // 根据选择的范围设置日期
-    const today = new Date();
-    let from = new Date(today);
-    let to = new Date(today);
+    // 根据选择的范围设置日期（UTC时区）
+    const now = new Date();
+    let from = new Date();
+    let to = new Date();
     
     switch (selectedRange) {
       case 'last_7_days':
-        from.setDate(today.getDate() - 6);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       case 'last_30_days':
-        from.setDate(today.getDate() - 29);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       case 'last_6_months':
-        from.setMonth(today.getMonth() - 5);
-        from.setDate(1);
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
       default: // 'today'
-        // 对于今天，使用今天的0点到23:59
-        from = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-        to = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+        // 对于今天，使用今天的UTC 0点到23:59
+        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
         break;
     }
     
@@ -469,11 +474,25 @@ export default function SalesPage() {
         return;
       }
       
+      // 将本地时间转换为UTC时间
+      const utcFrom = new Date(Date.UTC(
+        range.from.getFullYear(),
+        range.from.getMonth(),
+        range.from.getDate(),
+        0, 0, 0
+      ));
+      const utcTo = new Date(Date.UTC(
+        range.to.getFullYear(),
+        range.to.getMonth(),
+        range.to.getDate(),
+        23, 59, 59
+      ));
+      
       setDateRange(range);
       setError(null); // 清除之前的错误提示
-      fetchSalesData(range.from, range.to);
-      fetchItemsSoldData(range.from, range.to);
-      fetchCategoriesData(range.from, range.to);
+      fetchSalesData(utcFrom, utcTo);
+      fetchItemsSoldData(utcFrom, utcTo);
+      fetchCategoriesData(utcFrom, utcTo);
     }
   };
 
@@ -623,10 +642,10 @@ export default function SalesPage() {
               }
               
               if (range.to > now) {
-                // 如果结束日期是未来，调整为今天
+                // 如果结束日期是未来，调整为今天（UTC时区）
                 const adjustedRange: DateRange = {
                   from: range.from,
-                  to: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
+                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
                 };
                 setDateRange(adjustedRange);
                 handleDateRangeChange(adjustedRange);
@@ -938,8 +957,8 @@ export default function SalesPage() {
                 legends={[]}
                 tooltip={({ id, value, indexValue, color, data }) => {
                   // 计算环比变化
-                  const currentValue = data.current || 0;
-                  const previousValue = data.comparison || 0;
+                  const currentValue = Number(data.current) || 0;
+                  const previousValue = Number(data.comparison) || 0;
                   const change = previousValue > 0 ? ((currentValue - previousValue) / previousValue * 100) : 0;
                   
                   return (
