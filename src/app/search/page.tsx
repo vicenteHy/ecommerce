@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DateRangePicker } from "@/components/ui/date-range-picker";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DateTimeSelector } from "@/components/date-time-selector";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Line } from "@nivo/line";
 import { Bar } from "@nivo/bar";
@@ -12,7 +11,7 @@ import { Search, TrendingUp, Users, ShoppingCart, MousePointer, BarChart3, PieCh
 import { SearchMetrics, SearchTermData, SearchClickPosition, SearchBehavior, SearchSource, SearchDevice } from "@/lib/dashboard-data";
 
 export default function SearchPage() {
-  const [range, setRange] = useState<string>("today");
+  const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   const [searchMetrics, setSearchMetrics] = useState<SearchMetrics | null>(null);
   const [topSearchTerms, setTopSearchTerms] = useState<SearchTermData[]>([]);
   const [searchTrends, setSearchTrends] = useState<any>(null);
@@ -200,9 +199,9 @@ export default function SearchPage() {
   };
 
   // 尝试从API获取数据，失败时使用模拟数据
-  const fetchSearchData = async () => {
+  const fetchSearchData = async (rangeType: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/search/metrics?range=${range}`);
+      const response = await fetch(`http://localhost:8000/search/metrics?range=${rangeType}`);
       if (!response.ok) {
         throw new Error('API not available');
       }
@@ -218,17 +217,38 @@ export default function SearchPage() {
       setError(null);
     } catch (err) {
       console.log('使用模拟数据:', err);
-      generateMockData(range);
+      generateMockData(rangeType);
       setError(null); // 不显示错误，因为有模拟数据
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
+  // 处理日期范围变更
+  const handleDateRangeChange = (from: Date, to: Date) => {
+    setDateRange({from, to});
     setLoading(true);
-    fetchSearchData();
-  }, [range]);
+    
+    // 根据日期范围判断时间类型
+    const daysDiff = Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+    let rangeType = 'today';
+    if (daysDiff === 0) {
+      rangeType = 'today';
+    } else if (daysDiff <= 7) {
+      rangeType = 'last_7_days';
+    } else if (daysDiff <= 30) {
+      rangeType = 'last_30_days';
+    } else {
+      rangeType = 'last_6_months';
+    }
+    
+    fetchSearchData(rangeType);
+  };
+  
+  // 初始化时不做任何操作，等待 DateTimeSelector 组件的回调
+  useEffect(() => {
+    // 可以在这里添加一些初始化逻辑
+  }, []);
 
   const formatChange = (value: number) => {
     const prefix = value > 0 ? "+" : "";
@@ -249,26 +269,13 @@ export default function SearchPage() {
       "未知品牌", "特殊规格", "定制产品", "限量版", "概念产品"
     ].sort(() => Math.random() - 0.5).slice(0, 5);
     setNoResultTerms(noResults);
-  }, [range]);
+  }, [dateRange]);
 
   return (
     <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold md:text-2xl">搜索数据分析</h1>
-        <div className="flex items-center gap-2">
-          <DateRangePicker />
-          <Select value={range} onValueChange={setRange}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="选择时间范围" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">今天</SelectItem>
-              <SelectItem value="last_7_days">近7天</SelectItem>
-              <SelectItem value="last_30_days">近30天</SelectItem>
-              <SelectItem value="last_6_months">近6个月</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <DateTimeSelector onDateRangeChange={handleDateRangeChange} defaultRange="today" />
       </div>
 
       {/* 错误提示 */}

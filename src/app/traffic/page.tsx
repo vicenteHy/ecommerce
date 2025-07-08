@@ -11,15 +11,8 @@ import {
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { format } from "date-fns";
-import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
+import { DateTimeSelector } from "@/components/date-time-selector";
 
 // Import the data generation function and type
 import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
@@ -160,7 +153,6 @@ interface CountryComparisonData {
 }
 
 export default function TrafficPage() {
-  const [selectedRange, setSelectedRange] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   // 新增活跃用户数据状态
   const [activeUsersData, setActiveUsersData] = useState<ActiveUsersComparisonData | null>(null);
@@ -175,19 +167,16 @@ export default function TrafficPage() {
   // 新增国家访问数据状态
   const [countryData, setCountryData] = useState<CountryComparisonData | null>(null);
   // 新增日期范围选择状态
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 30);
-  const [dateRange, setDateRange] = useState<DateRange>({from: thirtyDaysAgo, to: today});
+  const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
-  // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
+  // 格式化日期为 YYYY-MM-DD 格式
   const formatDate = (date: Date): string => {
     try {
-      const year = date.getUTCFullYear();
-      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(date.getUTCDate()).padStart(2, '0');
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     } catch (err) {
       console.error('格式化日期错误:', err);
@@ -337,9 +326,9 @@ export default function TrafficPage() {
   const fetchRegistrationData = async (from: Date, to: Date) => {
     try {
       const formatDateTime = (date: Date): string => {
-        const year = date.getUTCFullYear();
-        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-        const day = String(date.getUTCDate()).padStart(2, '0');
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
         return `${year}-${month}-${day} 00:00:00`;
       };
       
@@ -469,77 +458,45 @@ export default function TrafficPage() {
     }
   };
 
+  // 初始化时不做任何操作，等待 DateTimeSelector 组件的回调
   useEffect(() => {
-    // Generate data dynamically using the imported function
-    const generatedData = generateDataForRange(selectedRange);
+    // 初始化 dashboardData
+    const generatedData = generateDataForRange('today');
     setDashboardData(generatedData);
-    
-    // 根据选择的范围设置日期（UTC时区）
-    const now = new Date();
-    let from = new Date();
-    let to = new Date();
-    
-    switch (selectedRange) {
-      case 'last_7_days':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      case 'last_30_days':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      case 'last_6_months':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      default: // 'today'
-        // 对于今天，使用今天的UTC 0点到23:59
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
+  }, []);
+  
+  // 处理日期范围变更
+  const handleDateRangeChange = (from: Date, to: Date) => {
+    // 检查日期范围是否合理
+    if (from > to) {
+      setError('起始日期不能大于结束日期');
+      return;
     }
     
-    setDateRange({from, to} as DateRange);
+    setDateRange({from, to});
+    setError(null); // 清除之前的错误提示
+    
+    // 根据日期范围更新 dashboardData
+    const daysDiff = Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+    let rangeType = 'today';
+    if (daysDiff === 0) {
+      rangeType = 'today';
+    } else if (daysDiff <= 7) {
+      rangeType = 'last_7_days';
+    } else if (daysDiff <= 30) {
+      rangeType = 'last_30_days';
+    } else {
+      rangeType = 'last_6_months';
+    }
+    const generatedData = generateDataForRange(rangeType);
+    setDashboardData(generatedData);
+    
     fetchRegistrationData(from, to);
     fetchActiveUsersData(from, to);
     fetchPageViewsData(from, to);
     fetchDeviceTypeData(from, to);
     fetchSessionData(from, to);
     fetchCountryData(from, to);
-  }, [selectedRange]);
-  
-  // 处理日期范围变更
-  const handleDateRangeChange = (range: DateRange) => {
-    if (range.from && range.to) {
-      // 检查日期范围是否合理
-      if (range.from > range.to) {
-        setError('起始日期不能大于结束日期');
-        return;
-      }
-      
-      // 将本地时间转换为UTC时间
-      const utcFrom = new Date(Date.UTC(
-        range.from.getFullYear(),
-        range.from.getMonth(),
-        range.from.getDate(),
-        0, 0, 0
-      ));
-      const utcTo = new Date(Date.UTC(
-        range.to.getFullYear(),
-        range.to.getMonth(),
-        range.to.getDate(),
-        23, 59, 59
-      ));
-      
-      setDateRange(range);
-      setError(null); // 清除之前的错误提示
-      fetchRegistrationData(utcFrom, utcTo);
-      fetchActiveUsersData(utcFrom, utcTo);
-      fetchPageViewsData(utcFrom, utcTo);
-      fetchDeviceTypeData(utcFrom, utcTo);
-      fetchSessionData(utcFrom, utcTo);
-      fetchCountryData(utcFrom, utcTo);
-    }
   };
 
   if (!dashboardData) {
@@ -580,55 +537,7 @@ export default function TrafficPage() {
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">流量数据</h1>
-        <div className="flex gap-4 items-center">
-          {/* 添加日期选择器 */}
-          <DateRangePicker 
-            dateRange={dateRange} 
-            onRangeChange={(range) => {
-              // 只更新UI状态，不发送请求
-              setDateRange(range);
-            }} 
-            placeholder="选择日期范围"
-            onConfirm={(range) => {
-              // 检查日期范围是否合理
-              if (range.from > range.to) {
-                setError('起始日期不能大于结束日期');
-                return;
-              }
-              
-              // 检查是否选择了未来日期
-              const now = new Date();
-              if (range.from > now) {
-                setError('开始日期不能是未来日期，请选择当前或过去的日期');
-                return;
-              }
-              
-              if (range.to > now) {
-                // 如果结束日期是未来，调整为今天（UTC时区）
-                const adjustedRange: DateRange = {
-                  from: range.from,
-                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
-                };
-                setDateRange(adjustedRange);
-                handleDateRangeChange(adjustedRange);
-              } else {
-                // 发送请求
-                handleDateRangeChange(range);
-              }
-            }}
-          />
-          <Select value={selectedRange} onValueChange={setSelectedRange}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="选择时间范围" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">今天</SelectItem>
-              <SelectItem value="last_7_days">近7天</SelectItem>
-              <SelectItem value="last_30_days">近30天</SelectItem>
-              <SelectItem value="last_6_months">近6个月</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <DateTimeSelector onDateRangeChange={handleDateRangeChange} defaultRange="today" />
       </div>
       
       {error && (
@@ -734,7 +643,7 @@ export default function TrafficPage() {
           <CardContent className="h-80">
             {/* 使用真实API数据 */}
             {activeUsersData && activeUsersData.current ? (
-              selectedRange === 'today' ? (
+              (dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) < 86400000) ? (
                 // 今天的数据显示为大数字
                 <div className="flex flex-col items-center justify-center h-full">
                   <div className="text-6xl font-bold text-foreground">

@@ -11,15 +11,8 @@ import {
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { format } from "date-fns";
-import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
+import { DateTimeSelector } from "@/components/date-time-selector";
 
 // Import the data generation function and type
 import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
@@ -36,94 +29,120 @@ interface CategoryStats {
   sales: number;
 }
 
-// 定义API返回的商品数据接口
-interface ProductComparisonData {
+// 定义API返回的销量数据接口
+interface SalesItem {
+  date: string;
+  total_items_sold: number;
+}
+
+interface DailyComparison {
+  date: string;
+  current_value: number;
+  previous_value: number;
+  change_rate: number;
+}
+
+interface SalesComparisonData {
+  current: SalesItem[];
+  previous: SalesItem[];
+  daily_comparison: DailyComparison[];
+  summary: {
+    current_total: number;
+    previous_total: number;
+    total_change_rate: number;
+  };
+}
+
+// 定义类别销量数据接口
+interface CategorySalesItem {
+  category_id: string;
+  category_name: string;
+  order_count: number;
+  item_count: number;
+  order_count_change: number;
+  item_count_change: number;
+}
+
+interface CategorySalesComparison {
   current: {
-    data: {
-      product_id: string;
-      product_name: string;
-      category: string;
-      sales_count: number;
-      views_count: number;
-      conversion_rate: number;
-      price: number;
-      cost: number;
-      profit: number;
-      created_at: string;
-    }[];
-    fields: string[];
-    total_products: number;
-    total_views: number;
-    total_sales: number;
-    ave_price: number;
-    ave_profit_margin: number;
-    category_stats?: Record<string, CategoryStats>;
-    time_aggregated_products?: ProductTimeData[];
+    categories: CategorySalesItem[];
+    total_categories: number;
   };
   previous: {
-    data: {
-      product_id: string;
-      product_name: string;
-      category: string;
-      sales_count: number;
-      views_count: number;
-      conversion_rate: number;
-      price: number;
-      cost: number;
-      profit: number;
-      created_at: string;
-    }[];
-    fields: string[];
-    total_products: number;
-    total_views: number;
-    total_sales: number;
-    ave_price: number;
-    ave_profit_margin: number;
-    category_stats?: Record<string, CategoryStats>;
-    time_aggregated_products?: ProductTimeData[];
+    categories: Array<{
+      category_id: string;
+      category_name: string;
+      order_count: number;
+      item_count: number;
+    }>;
+    total_categories: number;
   };
   comparison: {
-    total_products_change: number;
-    total_views_change: number;
-    total_sales_change: number;
-    ave_price_change: number;
-    ave_profit_margin_change: number;
+    total_categories_change: number;
   };
-  // 处理后的图表数据
-  lineChartViewsData?: Array<{
+}
+
+// 定义类别浏览量数据接口
+interface CategoryViewItem {
+  category_name: string;
+  current_count: number;
+  previous_count: number;
+  change_count: number;
+  change_rate: number;
+  rank: number;
+}
+
+interface CategoryViewComparison {
+  current: {
+    start_date: string;
+    end_date: string;
+    total_views: number;
+  };
+  previous: {
+    start_date: string;
+    end_date: string;
+    total_views: number;
+  };
+  comparison: CategoryViewItem[];
+}
+
+// 定义处理后的图表数据接口
+interface ProcessedProductData {
+  salesComparison: SalesComparisonData;
+  categorySalesData: CategorySalesComparison | null;
+  categoryViewData: CategoryViewComparison | null;
+  lineChartSalesData: Array<{
     id: string;
     data: Array<{
       x: Date;
       y: number;
     }>;
   }>;
-  lineChartSalesData?: Array<{
-    id: string;
-    data: Array<{
-      x: Date;
-      y: number;
-    }>;
-  }>;
-  combinedCategoryData?: Array<{
+  categorySalesBarData: Array<{
     category: string;
-    current_sales: number;
-    comparison_sales: number;
-    current_views: number;
-    comparison_views: number;
+    item_count: number;
+    order_count: number;
   }>;
+  categoryViewBarData: Array<{
+    category: string;
+    current: number;
+    comparison: number;
+  }>;
+  // 保留其他可能需要的数据结构
+  totalSales: number;
+  salesChange: number;
 }
 
 export default function ProductsPage() {
-  const [selectedRange, setSelectedRange] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   // 新增商品数据状态
-  const [productData, setProductData] = useState<ProductComparisonData | null>(null);
+  const [productData, setProductData] = useState<ProcessedProductData | null>(null);
+  // 新增类别销量数据状态
+  const [categorySalesData, setCategorySalesData] = useState<CategorySalesComparison | null>(null);
+  // 新增类别浏览量数据状态
+  const [categoryViewData, setCategoryViewData] = useState<CategoryViewComparison | null>(null);
   // 新增日期范围选择状态
-  // 设置默认日期范围：今天往前推30天
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 30);
-  const [dateRange, setDateRange] = useState<DateRange>({from: thirtyDaysAgo, to: today});
+  const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
@@ -142,202 +161,137 @@ export default function ProductsPage() {
   };
   
   // 处理商品数据和图表数据转换
-  const processProductData = (data: any) => {
+  const processProductData = (data: SalesComparisonData, categoryData: CategorySalesComparison | null, viewData: CategoryViewComparison | null): ProcessedProductData | null => {
     if (!data) return null;
-    
-    // 准备商品浏览量图表数据
-    const prepareViewsChartData = () => {
-      if (!data.current.time_aggregated_products) return [];
-      
-      // 当前时间段浏览量数据转换为线图格式
-      const currentViewsData = data.current.time_aggregated_products.map((item: any) => ({
-        x: new Date(item.time),
-        y: item.views_count
-      }));
-      
-      // 只返回当前时间段数据
-      return [
-        {
-          id: 'current',
-          data: currentViewsData
-        }
-      ];
-    };
     
     // 准备商品销量图表数据
     const prepareSalesChartData = () => {
-      if (!data.current.time_aggregated_products) return [];
+      if (!data.current || data.current.length === 0) return [];
       
       // 当前时间段销量数据转换为线图格式
-      const currentSalesData = data.current.time_aggregated_products.map((item: any) => ({
-        x: new Date(item.time),
-        y: item.sales_count
+      const currentSalesData = data.current.map((item) => ({
+        x: new Date(item.date),
+        y: item.total_items_sold
       }));
       
-      // 只返回当前时间段数据
+      // 上一时间段销量数据转换为线图格式
+      const previousSalesData = data.previous.map((item) => ({
+        x: new Date(item.date),
+        y: item.total_items_sold
+      }));
+      
+      // 返回两条线的数据
       return [
         {
-          id: 'current',
+          id: '当前时段',
           data: currentSalesData
+        },
+        {
+          id: '对比时段',
+          data: previousSalesData
         }
       ];
     };
     
-    // 准备商品类别数据
-    const prepareCategoryData = () => {
-      if (!data.current.category_stats) return [];
+    // 准备类别销量条形图数据
+    const prepareCategorySalesBarData = () => {
+      if (!categoryData || !categoryData.current.categories) return [];
       
-      // 按销量排序类别
-      const sortedCategories = Object.entries(data.current.category_stats)
-        .map(([category, stats]: [string, any]) => ({
-          category: category === '0' ? '未分类' : category,
-          sales: stats.sales,
-          views: stats.views
-        }))
-        .sort((a, b) => b.sales - a.sales)
-        .slice(0, 10); // 取前10名
-      
-      // 转换为图表数据格式
-      return sortedCategories.map((item) => {
-        const previousStats = data.previous.category_stats[item.category === '未分类' ? '0' : item.category];
-        return {
-          category: item.category,
-          current_sales: item.sales,
-          comparison_sales: previousStats ? previousStats.sales : 0,
-          current_views: item.views,
-          comparison_views: previousStats ? previousStats.views : 0
-        };
-      });
+      // 只取前10个类别
+      return categoryData.current.categories.slice(0, 10).map(cat => ({
+        category: cat.category_name,
+        item_count: cat.item_count,
+        order_count: cat.order_count
+      }));
     };
     
+    // 准备类别浏览量条形图数据
+    const prepareCategoryViewBarData = () => {
+      if (!viewData || !viewData.comparison) return [];
+      
+      // 使用返回的comparison数组，已经按rank排序
+      return viewData.comparison.map(item => ({
+        category: item.category_name,
+        current: item.current_count,
+        comparison: item.previous_count
+      }));
+    };
     
-    // 更新数据
+    // 返回处理后的数据
     return {
-      ...data,
-      lineChartViewsData: prepareViewsChartData(),
+      salesComparison: data,
+      categorySalesData: categoryData,
+      categoryViewData: viewData,
       lineChartSalesData: prepareSalesChartData(),
-      combinedCategoryData: prepareCategoryData()
+      categorySalesBarData: prepareCategorySalesBarData(),
+      categoryViewBarData: prepareCategoryViewBarData(),
+      totalSales: data.summary.current_total,
+      salesChange: data.summary.total_change_rate
     };
   };
   
-  // 模拟获取后端商品数据
+  // 获取真实的商品销量数据
   const fetchProductData = async (from: Date, to: Date) => {
     setError(null);
     try {
-      // 在实际应用中，这里会是真实的API调用
-      // 现在我们模拟一些数据
+      // 格式化日期为API需要的格式
+      const startDate = formatDate(from);
+      const endDate = formatDate(to);
       
-      // 生成模拟数据
-      const mockData = {
-        current: {
-          data: Array(50).fill(null).map((_, index) => ({
-            product_id: `P${1000 + index}`,
-            product_name: `商品${index + 1}`,
-            category: ['服装', '电子产品', '家居', '食品', '美妆'][Math.floor(Math.random() * 5)],
-            sales_count: Math.floor(Math.random() * 100),
-            views_count: Math.floor(Math.random() * 1000),
-            conversion_rate: Math.random() * 0.3,
-            price: Math.floor(Math.random() * 1000) + 10,
-            cost: Math.floor(Math.random() * 500) + 5,
-            profit: Math.floor(Math.random() * 500) + 5,
-            created_at: new Date(Date.now() - Math.random() * 10000000000).toISOString()
-          })),
-          fields: ['product_id', 'product_name', 'category', 'sales_count', 'views_count', 'stock_level', 'conversion_rate', 'price', 'cost', 'profit', 'created_at'],
-          total_products: 50,
-          total_views: 25000,
-          total_sales: 2500,
-          ave_price: 250,
-          ave_profit_margin: 0.4
-        },
-        previous: {
-          data: Array(45).fill(null).map((_, index) => ({
-            product_id: `P${1000 + index}`,
-            product_name: `商品${index + 1}`,
-            category: ['服装', '电子产品', '家居', '食品', '美妆'][Math.floor(Math.random() * 5)],
-            sales_count: Math.floor(Math.random() * 90),
-            views_count: Math.floor(Math.random() * 900),
-            conversion_rate: Math.random() * 0.25,
-            price: Math.floor(Math.random() * 950) + 10,
-            cost: Math.floor(Math.random() * 450) + 5,
-            profit: Math.floor(Math.random() * 450) + 5,
-            created_at: new Date(Date.now() - Math.random() * 15000000000).toISOString()
-          })),
-          fields: ['product_id', 'product_name', 'category', 'sales_count', 'views_count', 'stock_level', 'conversion_rate', 'price', 'cost', 'profit', 'created_at'],
-          total_products: 45,
-          total_views: 22000,
-          total_sales: 2200,
-          ave_price: 240,
-          ave_profit_margin: 0.38
-        },
-        comparison: {
-          total_products_change: 11.11,
-          total_views_change: 13.64,
-          total_sales_change: 13.64,
-          ave_price_change: 4.17,
-          ave_profit_margin_change: 5.26
-        }
-      };
+      // 并行调用三个API
+      const [salesResponse, categoryResponse, viewResponse] = await Promise.all([
+        // 获取销量数据
+        fetch(
+          `http://localhost:8000/sales/items-sold/comparison?start_date=${startDate}&end_date=${endDate}`,
+          {
+            headers: {
+              'accept': 'application/json'
+            }
+          }
+        ),
+        // 获取类别销量数据
+        fetch(
+          `http://localhost:8000/sales/categories/comparison?start_date=${startDate}&end_date=${endDate}&limit=10`,
+          {
+            headers: {
+              'accept': 'application/json'
+            }
+          }
+        ),
+        // 获取类别浏览量数据
+        fetch(
+          `http://localhost:8000/product/category-view/comparison?start_date=${startDate}&end_date=${endDate}&limit=10`,
+          {
+            headers: {
+              'accept': 'application/json'
+            }
+          }
+        )
+      ]);
       
-      // 添加类别统计
-      const categoryStats: Record<string, CategoryStats> = {};
-      const prevCategoryStats: Record<string, CategoryStats> = {};
-      
-      // 当前数据的类别统计
-      mockData.current.data.forEach(product => {
-        if (!categoryStats[product.category]) {
-          categoryStats[product.category] = {
-            views: 0,
-            sales: 0
-          };
-        }
-        categoryStats[product.category].views += product.views_count;
-        categoryStats[product.category].sales += product.sales_count;
-      });
-      
-      // 前期数据的类别统计
-      mockData.previous.data.forEach(product => {
-        if (!prevCategoryStats[product.category]) {
-          prevCategoryStats[product.category] = {
-            views: 0,
-            sales: 0
-          };
-        }
-        prevCategoryStats[product.category].views += product.views_count;
-        prevCategoryStats[product.category].sales += product.sales_count;
-      });
-      
-      mockData.current.category_stats = categoryStats;
-      mockData.previous.category_stats = prevCategoryStats;
-      
-      // 添加时间聚合数据
-      const daysInRange = Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
-      const timeAggregated: ProductTimeData[] = [];
-      const prevTimeAggregated: ProductTimeData[] = [];
-      
-      for (let i = 0; i < daysInRange; i++) {
-        const date = new Date(from);
-        date.setDate(from.getDate() + i);
-        
-        // 当前时间的数据
-        timeAggregated.push({
-          time: formatDate(date),
-          views_count: Math.floor(Math.random() * 1000) + 500,
-          sales_count: Math.floor(Math.random() * 100) + 50
-        });
-        
-        // 前期时间的数据（稍低一些）
-        prevTimeAggregated.push({
-          time: formatDate(date),
-          views_count: Math.floor(Math.random() * 900) + 450,
-          sales_count: Math.floor(Math.random() * 90) + 45
-        });
+      if (!salesResponse.ok) {
+        throw new Error(`销量数据 HTTP error! status: ${salesResponse.status}`);
       }
       
-      mockData.current.time_aggregated_products = timeAggregated;
-      mockData.previous.time_aggregated_products = prevTimeAggregated;
+      if (!categoryResponse.ok) {
+        throw new Error(`类别数据 HTTP error! status: ${categoryResponse.status}`);
+      }
+      
+      if (!viewResponse.ok) {
+        throw new Error(`类别浏览量数据 HTTP error! status: ${viewResponse.status}`);
+      }
+      
+      const salesData: SalesComparisonData = await salesResponse.json();
+      const categoryData: CategorySalesComparison = await categoryResponse.json();
+      const viewData: CategoryViewComparison = await viewResponse.json();
+      
+      // 设置类别销量数据
+      setCategorySalesData(categoryData);
+      // 设置类别浏览量数据
+      setCategoryViewData(viewData);
       
       // 处理数据
-      const processedData = processProductData(mockData);
+      const processedData = processProductData(salesData, categoryData, viewData);
       setProductData(processedData);
       
     } catch (err) {
@@ -346,69 +300,34 @@ export default function ProductsPage() {
     }
   };
   
+  // 初始化时不做任何操作，等待 DateTimeSelector 组件的回调
   useEffect(() => {
-    console.log("Selected range changed:", selectedRange);
-    // Generate data dynamically using the imported function
-    const generatedData = generateDataForRange(selectedRange);
+    // 初始化 dashboardData
+    const generatedData = generateDataForRange('today');
     setDashboardData(generatedData);
-    
-    // 根据选择的范围设置日期（UTC时区）
-    const now = new Date();
-    let from = new Date();
-    let to = new Date();
-    
-    switch (selectedRange) {
-      case 'last_7_days':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      case 'last_30_days':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      case 'last_6_months':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      default: // 'today'
-        // 对于今天，使用今天的UTC 0点到23:59
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-    }
-    
-    setDateRange({from, to} as DateRange);
-    console.log('设置日期范围:', {from: formatDate(from), to: formatDate(to)});
-    fetchProductData(from, to);
-  }, [selectedRange]);
+  }, []);
   
   // 处理日期范围变更
-  const handleDateRangeChange = (range: DateRange) => {
-    if (range.from && range.to) {
-      // 检查日期范围是否合理
-      if (range.from > range.to) {
-        setError('起始日期不能大于结束日期');
-        return;
-      }
-      
-      // 将本地时间转换为UTC时间
-      const utcFrom = new Date(Date.UTC(
-        range.from.getFullYear(),
-        range.from.getMonth(),
-        range.from.getDate(),
-        0, 0, 0
-      ));
-      const utcTo = new Date(Date.UTC(
-        range.to.getFullYear(),
-        range.to.getMonth(),
-        range.to.getDate(),
-        23, 59, 59
-      ));
-      
-      setDateRange(range);
-      setError(null); // 清除之前的错误提示
-      fetchProductData(utcFrom, utcTo);
+  const handleDateRangeChange = (from: Date, to: Date) => {
+    setDateRange({from, to});
+    setError(null); // 清除之前的错误提示
+    
+    // 根据日期范围更新 dashboardData
+    const daysDiff = Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+    let rangeType = 'today';
+    if (daysDiff === 0) {
+      rangeType = 'today';
+    } else if (daysDiff <= 7) {
+      rangeType = 'last_7_days';
+    } else if (daysDiff <= 30) {
+      rangeType = 'last_30_days';
+    } else {
+      rangeType = 'last_6_months';
     }
+    const generatedData = generateDataForRange(rangeType);
+    setDashboardData(generatedData);
+    
+    fetchProductData(from, to);
   };
 
   if (!dashboardData) {
@@ -445,55 +364,7 @@ export default function ProductsPage() {
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">商品数据</h1>
-        <div className="flex gap-4 items-center">
-          {/* 添加日期选择器 */}
-          <DateRangePicker 
-            dateRange={dateRange} 
-            onRangeChange={(range) => {
-              // 只更新UI状态，不发送请求
-              setDateRange(range);
-            }} 
-            placeholder="选择日期范围"
-            onConfirm={(range) => {
-              // 检查日期范围是否合理
-              if (range.from > range.to) {
-                setError('起始日期不能大于结束日期');
-                return;
-              }
-              
-              // 检查是否选择了未来日期
-              const now = new Date();
-              if (range.from > now) {
-                setError('开始日期不能是未来日期，请选择当前或过去的日期');
-                return;
-              }
-              
-              if (range.to > now) {
-                // 如果结束日期是未来，调整为今天（UTC时区）
-                const adjustedRange: DateRange = {
-                  from: range.from,
-                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
-                };
-                setDateRange(adjustedRange);
-                handleDateRangeChange(adjustedRange);
-              } else {
-                // 发送请求
-                handleDateRangeChange(range);
-              }
-            }}
-          />
-          <Select value={selectedRange} onValueChange={setSelectedRange}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="选择时间范围" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">今天</SelectItem>
-              <SelectItem value="last_7_days">近7天</SelectItem>
-              <SelectItem value="last_30_days">近30天</SelectItem>
-              <SelectItem value="last_6_months">近6个月</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <DateTimeSelector onDateRangeChange={handleDateRangeChange} defaultRange="today" />
       </div>
       
       {error && (
@@ -508,26 +379,18 @@ export default function ProductsPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">总销售量（商品）({dashboardData.currentLabel})</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {productData && productData.current && productData.current.total_sales !== undefined ? (
+              {productData && productData.totalSales !== undefined ? (
                 <>
-                  {productData.current.total_sales.toLocaleString()}
-                  {productData.comparison && isFinite(productData.comparison.total_sales_change) && (
-                    <span className={`ml-2 text-xs font-medium ${productData.comparison.total_sales_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {productData.comparison.total_sales_change >= 0 ? '+' : ''}{productData.comparison.total_sales_change.toFixed(1)}%
+                  {productData.totalSales.toLocaleString()}
+                  {isFinite(productData.salesChange) && (
+                    <span className={`ml-2 text-xs font-medium ${productData.salesChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {productData.salesChange >= 0 ? '+' : ''}{productData.salesChange.toFixed(1)}%
                       <span className="text-muted-foreground text-xs ml-1">(环比)</span>
                     </span>
                   )}
                 </>
               ) : (
-                <>
-                  {(dashboardData.totalItemsPurchased || 0).toLocaleString()}
-                  {isFinite(dashboardData.itemsPurchasedChange || 0) && (
-                    <span className={`ml-2 text-xs font-medium ${(dashboardData.itemsPurchasedChange || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {(dashboardData.itemsPurchasedChange || 0) >= 0 ? '+' : ''}{(dashboardData.itemsPurchasedChange || 0).toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
-                </>
+                <span>加载中...</span>
               )}
             </CardDescription>
           </CardHeader>
@@ -538,26 +401,18 @@ export default function ProductsPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">总加购量（商品）({dashboardData.currentLabel})</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {productData && productData.current ? (
+              {productData && productData.totalSales !== undefined ? (
                 <>
-                  {Math.floor(productData.current.total_sales * 2.5).toLocaleString()}
-                  {productData.comparison && isFinite(productData.comparison.total_sales_change) && (
-                    <span className={`ml-2 text-xs font-medium ${productData.comparison.total_sales_change - 1 >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {productData.comparison.total_sales_change - 1 >= 0 ? '+' : ''}{(productData.comparison.total_sales_change - 1).toFixed(1)}%
+                  {Math.floor(productData.totalSales * 2.5).toLocaleString()}
+                  {isFinite(productData.salesChange) && (
+                    <span className={`ml-2 text-xs font-medium ${productData.salesChange - 1 >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {productData.salesChange - 1 >= 0 ? '+' : ''}{(productData.salesChange - 1).toFixed(1)}%
                       <span className="text-muted-foreground text-xs ml-1">(环比)</span>
                     </span>
                   )}
                 </>
               ) : (
-                <>
-                  {Math.floor((dashboardData.totalItemsPurchased || 0) * 2.5).toLocaleString()}
-                  {isFinite(dashboardData.itemsPurchasedChange || 0) && (
-                    <span className={`ml-2 text-xs font-medium ${((dashboardData.itemsPurchasedChange || 0) - 0.8) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {((dashboardData.itemsPurchasedChange || 0) - 0.8) >= 0 ? '+' : ''}{((dashboardData.itemsPurchasedChange || 0) - 0.8).toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
-                </>
+                <span>加载中...</span>
               )}
             </CardDescription>
           </CardHeader>
@@ -568,26 +423,23 @@ export default function ProductsPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">总浏览量（商品）({dashboardData.currentLabel})</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {productData && productData.current && productData.current.total_views !== undefined ? (
+              {categoryViewData && categoryViewData.current ? (
                 <>
-                  {productData.current.total_views.toLocaleString()}
-                  {productData.comparison && isFinite(productData.comparison.total_views_change) && (
-                    <span className={`ml-2 text-xs font-medium ${productData.comparison.total_views_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {productData.comparison.total_views_change >= 0 ? '+' : ''}{productData.comparison.total_views_change.toFixed(1)}%
+                  {categoryViewData.current.total_views.toLocaleString()}
+                  {categoryViewData.previous && (
+                    <span className={`ml-2 text-xs font-medium ${
+                      ((categoryViewData.current.total_views - categoryViewData.previous.total_views) / categoryViewData.previous.total_views * 100) >= 0 
+                        ? 'text-green-600' 
+                        : 'text-red-600'
+                    }`}>
+                      {((categoryViewData.current.total_views - categoryViewData.previous.total_views) / categoryViewData.previous.total_views * 100) >= 0 ? '+' : ''}
+                      {((categoryViewData.current.total_views - categoryViewData.previous.total_views) / categoryViewData.previous.total_views * 100).toFixed(1)}%
                       <span className="text-muted-foreground text-xs ml-1">(环比)</span>
                     </span>
                   )}
                 </>
               ) : (
-                <>
-                  {(dashboardData.totalViews || 0).toLocaleString()}
-                  {isFinite(dashboardData.viewsChange || 0) && (
-                    <span className={`ml-2 text-xs font-medium ${(dashboardData.viewsChange || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {(dashboardData.viewsChange || 0) >= 0 ? '+' : ''}{(dashboardData.viewsChange || 0).toFixed(1)}%
-                      <span className="text-muted-foreground text-xs ml-1">(对比 {dashboardData.comparisonLabel})</span>
-                    </span>
-                  )}
-                </>
+                <span>加载中...</span>
               )}
             </CardDescription>
           </CardHeader>
@@ -603,12 +455,12 @@ export default function ProductsPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">商品销量趋势 ({dashboardData.currentLabel})</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
-            {productData && productData.lineChartSalesData ? (
+            {productData && productData.lineChartSalesData && productData.lineChartSalesData.length > 0 ? (
               <ResponsiveLine
                 key={`sales-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
                 {...dashboardData.commonLineProps}
                 data={productData.lineChartSalesData}
-                colors={['#10b981']} // 销量用绿色
+                colors={['#10b981', '#ef4444']} // 当前时段用绿色，对比时段用红色
                 lineWidth={2}
                 enablePoints={true}
                 pointSize={4}
@@ -653,15 +505,42 @@ export default function ProductsPage() {
                     return String(v);
                   },
                 }}
+                legends={[
+                  {
+                    anchor: 'top-right',
+                    direction: 'row',
+                    justify: false,
+                    translateX: 0,
+                    translateY: -30,
+                    itemsSpacing: 5,
+                    itemDirection: 'left-to-right',
+                    itemWidth: 80,
+                    itemHeight: 20,
+                    itemOpacity: 0.75,
+                    symbolSize: 12,
+                    symbolShape: 'circle',
+                    symbolBorderColor: 'rgba(0, 0, 0, .5)',
+                    effects: [
+                      {
+                        on: 'hover',
+                        style: {
+                          itemBackground: 'rgba(0, 0, 0, .03)',
+                          itemOpacity: 1
+                        }
+                      }
+                    ]
+                  }
+                ]}
                 tooltip={({ point }) => (
                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                    <strong>{point.serieId}</strong><br/>
                     <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'} 件销售
                   </div>
                 )}
               />
             ) : (
               <div className="flex justify-center items-center h-full">
-                <span>无销量数据</span>
+                <span>加载销量数据中...</span>
               </div>
             )}
           </CardContent>
@@ -673,18 +552,42 @@ export default function ProductsPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">类别销量 ({dashboardData.currentLabel})</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
-            {productData && productData.combinedCategoryData ? (
+            {productData && productData.categorySalesBarData && productData.categorySalesBarData.length > 0 ? (
               <ResponsiveBar
                 {...dashboardData.commonBarProps}
-                data={productData.combinedCategoryData}
-                keys={['current_sales', 'comparison_sales']}
+                data={productData.categorySalesBarData.map(cat => ({
+                  ...cat,
+                  current: cat.item_count,
+                  comparison: Math.floor(cat.item_count * 0.85) // 模拟对比数据
+                }))}
+                keys={['current', 'comparison']}
                 indexBy="category"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
+                margin={{ top: 10, right: 10, bottom: 80, left: 60 }}
                 padding={0.3}
-                defs={dashboardData.gradientDefs}
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
+                defs={[
+                  {
+                    id: 'gradientCurrent',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#6366f1' },
+                      { offset: 100, color: '#a5b4fc' },
+                    ],
+                  },
+                  {
+                    id: 'gradientComparison',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#a5b4fc' },
+                      { offset: 100, color: '#e0e7ff' },
+                    ],
+                  },
+                ]}
                 fill={[
-                  { match: { id: 'current_sales' }, id: 'gradientCurrent' },
-                  { match: { id: 'comparison_sales' }, id: 'gradientComparison' }
+                  { match: { id: 'current' }, id: 'gradientCurrent' },
+                  { match: { id: 'comparison' }, id: 'gradientComparison' }
                 ]}
                 axisBottom={{
                   tickSize: 5,
@@ -707,11 +610,26 @@ export default function ProductsPage() {
                 }}
                 enableLabel={false}
                 legends={[]}
-                tooltip={({ id, value, indexValue }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{indexValue}</strong>: {value.toLocaleString()} 销量
-                  </div>
-                )}
+                tooltip={({ id, value, indexValue, data }) => {
+                  const currentValue = Number(data.current) || 0;
+                  const previousValue = Number(data.comparison) || 0;
+                  const change = previousValue > 0 ? ((currentValue - previousValue) / previousValue * 100) : 0;
+                  
+                  return (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{indexValue}</strong><br />
+                      {id === 'current' ? '当前' : '对比'}: {value.toLocaleString()} 件<br />
+                      {id === 'current' && data.order_count && (
+                        <>订单数量: {data.order_count.toLocaleString()}<br /></>
+                      )}
+                      {id === 'current' && previousValue > 0 && (
+                        <span style={{ color: change >= 0 ? 'green' : 'red' }}>
+                          环比: {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  );
+                }}
               />
             ) : (
               <div className="flex justify-center items-center h-full">
@@ -727,15 +645,39 @@ export default function ProductsPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">类别浏览量 ({dashboardData.currentLabel})</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
-            {productData && productData.combinedCategoryData ? (
+            {productData && productData.categoryViewBarData && productData.categoryViewBarData.length > 0 ? (
               <ResponsiveBar
                 {...dashboardData.commonBarProps}
-                data={productData.combinedCategoryData}
-                keys={['current_views', 'comparison_views']}
+                data={productData.categoryViewBarData}
+                keys={['current', 'comparison']}
                 indexBy="category"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
+                margin={{ top: 10, right: 10, bottom: 80, left: 60 }}
                 padding={0.3}
-                colors={['#6366f1', '#a5b4fc']} // 浏览量用蓝色系
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
+                defs={[
+                  {
+                    id: 'gradientCurrent',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#6366f1' },
+                      { offset: 100, color: '#a5b4fc' },
+                    ],
+                  },
+                  {
+                    id: 'gradientComparison',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#a5b4fc' },
+                      { offset: 100, color: '#e0e7ff' },
+                    ],
+                  },
+                ]}
+                fill={[
+                  { match: { id: 'current' }, id: 'gradientCurrent' },
+                  { match: { id: 'comparison' }, id: 'gradientComparison' }
+                ]}
                 axisBottom={{
                   tickSize: 5,
                   tickPadding: 5,
@@ -757,11 +699,23 @@ export default function ProductsPage() {
                 }}
                 enableLabel={false}
                 legends={[]}
-                tooltip={({ id, value, indexValue }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{indexValue}</strong>: {value.toLocaleString()} 次浏览
-                  </div>
-                )}
+                tooltip={({ id, value, indexValue, data }) => {
+                  const currentValue = Number(data.current) || 0;
+                  const previousValue = Number(data.comparison) || 0;
+                  const change = previousValue > 0 ? ((currentValue - previousValue) / previousValue * 100) : 0;
+                  
+                  return (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{indexValue}</strong><br />
+                      {id === 'current' ? '当前' : '对比'}: {value.toLocaleString()} 次浏览<br />
+                      {id === 'current' && previousValue > 0 && (
+                        <span style={{ color: change >= 0 ? 'green' : 'red' }}>
+                          环比: {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  );
+                }}
               />
             ) : (
               <div className="flex justify-center items-center h-full">
@@ -770,8 +724,6 @@ export default function ProductsPage() {
             )}
           </CardContent>
         </Card>
-
-
 
         {/* 7. 热销商品排名 */}
         <Card className="md:col-span-2">
@@ -793,31 +745,18 @@ export default function ProductsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {productData && productData.current && productData.current.data ? (
-                    productData.current.data
-                      .sort((a, b) => b.sales_count - a.sales_count)
-                      .slice(0, 10)
-                      .map((product, index) => (
-                        <tr key={index} className="border-b last:border-0 hover:bg-gray-50">
-                          <td className="py-3">{index + 1}</td>
-                          <td className="py-3">{product.product_name}</td>
-                          <td className="py-3">{product.category}</td>
-                          <td className="py-3">¥{product.price.toFixed(2)}</td>
-                          <td className="py-3">{product.sales_count}</td>
-                          <td className="py-3">{product.views_count}</td>
-                          <td className="py-3">{product.conversion_rate ? (product.conversion_rate * 100).toFixed(2) : '0.00'}%</td>
-                        </tr>
-                      ))
-                  ) : (
-                    <tr>
-                      <td colSpan={7} className="py-4 text-center">无商品数据</td>
-                    </tr>
-                  )}
+                  {/* 暂时显示模拟数据提示 */}
+                  <tr>
+                    <td colSpan={7} className="py-4 text-center text-gray-500">
+                      暂无热销商品数据
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
           </CardContent>
         </Card>
+
       </div>
     </div>
   );

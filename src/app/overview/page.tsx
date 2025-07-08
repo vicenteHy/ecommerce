@@ -11,18 +11,8 @@ import {
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveFunnel } from '@nivo/funnel';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { format } from "date-fns";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { Calendar as CalendarIcon } from 'lucide-react';
-import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
+import { DateTimeSelector } from "@/components/date-time-selector";
 
 
 // Define active users API response interface
@@ -249,7 +239,6 @@ interface ItemsSoldData {
 
 // --- Page Component ---
 export default function DataOverviewPage() {
-  const [selectedRange, setSelectedRange] = useState<string>('today');
   // 新增销售数据状态
   const [salesData, setSalesData] = useState<SalesComparisonData | null>(null);
   // 新增活跃用户数据状态
@@ -264,12 +253,8 @@ export default function DataOverviewPage() {
   const [sessionData, setSessionData] = useState<SessionComparisonData | null>(null);
   // 新增商品销量数据状态
   const [itemsSoldData, setItemsSoldData] = useState<ItemsSoldData | null>(null);
-  // 新增日期范围选择状态
-  // 设置默认日期范围：今天往前推30天
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 30);
-  const [dateRange, setDateRange] = useState<DateRange>({from: thirtyDaysAgo, to: today});
+  // 新增日期范围状态，用于显示
+  const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
@@ -750,36 +735,23 @@ export default function DataOverviewPage() {
     });
   };
   
-  useEffect(() => {
-    console.log("Selected range changed:", selectedRange);
-    
-    // 根据选择的范围设置日期（UTC时区）
+  // 判断日期范围是否为今天
+  const isToday = () => {
     const now = new Date();
-    let from = new Date();
-    let to = new Date();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+    const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
     
-    switch (selectedRange) {
-      case 'last_7_days':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      case 'last_30_days':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      case 'last_6_months':
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-      default: // 'today'
-        // 对于今天，使用今天的UTC 0点到23:59
-        from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-        to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-        break;
-    }
+    return dateRange.from && dateRange.to && 
+           dateRange.from.getTime() === todayStart.getTime() && 
+           dateRange.to.getTime() === todayEnd.getTime();
+  };
+
+  // 处理日期范围变更的回调函数
+  const handleDateRangeChange = (from: Date, to: Date) => {
+    setDateRange({from, to});
+    console.log('日期范围变更:', {from: formatDate(from), to: formatDate(to)});
     
-    setDateRange({from, to} as DateRange);
-    console.log('设置日期范围:', {from: formatDate(from), to: formatDate(to)});
+    // 获取所有数据
     fetchSalesData(from, to);
     fetchActiveUsersData(from, to);
     fetchSearchStatsData(from, to);
@@ -787,41 +759,6 @@ export default function DataOverviewPage() {
     fetchFunnelData(from, to);
     fetchSessionData(from, to);
     fetchItemsSoldData(from, to);
-  }, [selectedRange]);
-  
-  // 处理日期范围变更
-  const handleDateRangeChange = (range: DateRange) => {
-    if (range.from && range.to) {
-      // 检查日期范围是否合理
-      if (range.from > range.to) {
-        setError('起始日期不能大于结束日期');
-        return;
-      }
-      
-      // 将本地时间转换为UTC时间
-      const utcFrom = new Date(Date.UTC(
-        range.from.getFullYear(),
-        range.from.getMonth(),
-        range.from.getDate(),
-        0, 0, 0
-      ));
-      const utcTo = new Date(Date.UTC(
-        range.to.getFullYear(),
-        range.to.getMonth(),
-        range.to.getDate(),
-        23, 59, 59
-      ));
-      
-      setDateRange(range);
-      setError(null); // 清除之前的错误提示
-      fetchSalesData(utcFrom, utcTo);
-      fetchActiveUsersData(utcFrom, utcTo);
-      fetchSearchStatsData(utcFrom, utcTo);
-      fetchPageViewsData(utcFrom, utcTo);
-      fetchFunnelData(utcFrom, utcTo);
-      fetchSessionData(utcFrom, utcTo);
-      fetchItemsSoldData(utcFrom, utcTo);
-    }
   };
 
 
@@ -913,57 +850,10 @@ export default function DataOverviewPage() {
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">数据总览</h1>
-        <div className="flex gap-4 items-center">
-          {/* 将确认按钮整合到日期选择器内部 */}
-          <DateRangePicker 
-            dateRange={dateRange} 
-            onRangeChange={(range) => {
-              // 只更新UI状态，不发送请求
-              setDateRange(range);
-            }} 
-            placeholder="选择日期范围"
-            onConfirm={(range) => {
-              // 检查日期范围是否合理
-              if (range.from > range.to) {
-                setError('起始日期不能大于结束日期');
-                return;
-              }
-              
-              // 移除180天时间限制
-              
-              // 检查是否选择了未来日期
-              const now = new Date();
-              if (range.from > now) {
-                setError('开始日期不能是未来日期，请选择当前或过去的日期');
-                return;
-              }
-              
-              if (range.to > now) {
-                // 如果结束日期是未来，调整为今天（UTC时区）
-                const adjustedRange: DateRange = {
-                  from: range.from,
-                  to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59))
-                };
-                setDateRange(adjustedRange);
-                handleDateRangeChange(adjustedRange);
-              } else {
-                // 发送请求
-                handleDateRangeChange(range);
-              }
-            }}
-          />
-          <Select value={selectedRange} onValueChange={setSelectedRange}>
-            <SelectTrigger className="w-[120px]">
-                <SelectValue placeholder="选择时间范围" />
-            </SelectTrigger>
-            <SelectContent>
-                <SelectItem value="today">今天</SelectItem>
-                <SelectItem value="last_7_days">近7天</SelectItem>
-                <SelectItem value="last_30_days">近30天</SelectItem>
-                <SelectItem value="last_6_months">近6个月</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <DateTimeSelector 
+          onDateRangeChange={handleDateRangeChange}
+          defaultRange="today"
+        />
       </div>
       
       {error && (
@@ -1003,7 +893,7 @@ export default function DataOverviewPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-             {selectedRange === 'today' && salesData && salesData.current ? (
+             {isToday() && salesData && salesData.current ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <div className="text-4xl font-bold text-foreground mb-2">
@@ -1239,7 +1129,7 @@ export default function DataOverviewPage() {
           </CardHeader>
           <CardContent className="h-64">
              {/* 使用真实API数据或降级到模拟数据 */}
-             {selectedRange === 'today' && activeUsersData && activeUsersData.current ? (
+             {isToday() && activeUsersData && activeUsersData.current ? (
                <div className="flex items-center justify-center h-full">
                  <div className="text-center">
                    <div className="text-4xl font-bold text-foreground mb-2">
@@ -1503,7 +1393,7 @@ export default function DataOverviewPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {selectedRange === 'today' && itemsSoldData && itemsSoldData.current ? (
+            {isToday() && itemsSoldData && itemsSoldData.current ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <div className="text-4xl font-bold text-foreground mb-2">

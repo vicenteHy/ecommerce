@@ -29,14 +29,14 @@ const navItems = [
     icon: LineChart,
   },
   {
-    href: "/conversion",
-    label: "转化数据",
-    icon: Users,
-  },
-  {
     href: "/products",
     label: "商品数据",
     icon: Package,
+  },
+  {
+    href: "/conversion",
+    label: "转化数据",
+    icon: Users,
   },
   {
     href: "/search",
