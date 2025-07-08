@@ -46,6 +46,29 @@ interface ActiveUsersComparisonData {
   };
 }
 
+// 定义注册数据接口
+interface RegistrationComparisonData {
+  status: string;
+  data: {
+    current_period: {
+      start: string;
+      end: string;
+      total_registrations: number;
+      average_daily: number;
+    };
+    previous_period: {
+      start: string;
+      end: string;
+      total_registrations: number;
+      average_daily: number;
+    };
+    comparison: {
+      total_change: number;
+      change_rate: number;
+    };
+  };
+}
+
 // 定义页面浏览量数据接口
 interface PageViewData {
   page_name: string;
@@ -104,6 +127,38 @@ interface SessionComparisonData {
   };
 }
 
+// 定义国家访问数据接口
+interface CountryData {
+  country_code: string;
+  country_name: string;
+  user_count: number;
+  percentage: number;
+}
+
+interface CountryUsersData {
+  total_users: number;
+  countries: CountryData[];
+  start_date: string;
+  end_date: string;
+}
+
+interface CountryComparisonData {
+  current: CountryUsersData;
+  previous: CountryUsersData;
+  comparison: {
+    total_change_rate: number;
+    total_change_amount: number;
+    country_changes: Array<{
+      country_code: string;
+      country_name: string;
+      current_count: number;
+      previous_count: number;
+      change_rate: number;
+      change_amount: number;
+    }>;
+  };
+}
+
 export default function TrafficPage() {
   const [selectedRange, setSelectedRange] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -115,6 +170,10 @@ export default function TrafficPage() {
   const [deviceTypeData, setDeviceTypeData] = useState<DeviceTypeData | null>(null);
   // 新增会话数据状态
   const [sessionData, setSessionData] = useState<SessionComparisonData | null>(null);
+  // 新增注册数据状态
+  const [registrationData, setRegistrationData] = useState<RegistrationComparisonData | null>(null);
+  // 新增国家访问数据状态
+  const [countryData, setCountryData] = useState<CountryComparisonData | null>(null);
   // 新增日期范围选择状态
   const today = new Date();
   const thirtyDaysAgo = new Date(today);
@@ -274,6 +333,56 @@ export default function TrafficPage() {
     }
   };
 
+  // 获取后端注册数据
+  const fetchRegistrationData = async (from: Date, to: Date) => {
+    try {
+      const formatDateTime = (date: Date): string => {
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        return `${year}-${month}-${day} 00:00:00`;
+      };
+      
+      const url = `http://localhost:8000/registration/comparison?current_start_date=${formatDateTime(from)}&current_end_date=${formatDateTime(to)}`;
+      console.log('请求注册数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析注册数据JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('注册数据:', data);
+      
+      // 检查数据格式
+      const isValidData = data && typeof data === 'object' && 'status' in data && data.status === 'success' && 'data' in data;
+      
+      if (isValidData) {
+        setRegistrationData(data);
+      } else {
+        console.log('注册数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取注册数据错误:', err);
+    }
+  };
+
   // 获取后端会话数据
   const fetchSessionData = async (from: Date, to: Date) => {
     try {
@@ -317,6 +426,49 @@ export default function TrafficPage() {
     }
   };
 
+  // 获取后端国家访问数据
+  const fetchCountryData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/traffic/active-users/by-country/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求国家访问数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const textData = await response.text();
+      let data;
+      try {
+        data = JSON.parse(textData);
+      } catch (parseError) {
+        console.error('解析国家访问数据JSON失败:', parseError);
+        return;
+      }
+      
+      console.log('国家访问数据:', data);
+      
+      // 检查数据格式
+      const isValidData = data && typeof data === 'object' && 'current' in data && 'previous' in data && 'comparison' in data;
+      
+      if (isValidData) {
+        setCountryData(data);
+      } else {
+        console.log('国家访问数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取国家访问数据错误:', err);
+    }
+  };
+
   useEffect(() => {
     // Generate data dynamically using the imported function
     const generatedData = generateDataForRange(selectedRange);
@@ -348,10 +500,12 @@ export default function TrafficPage() {
     }
     
     setDateRange({from, to} as DateRange);
+    fetchRegistrationData(from, to);
     fetchActiveUsersData(from, to);
     fetchPageViewsData(from, to);
     fetchDeviceTypeData(from, to);
     fetchSessionData(from, to);
+    fetchCountryData(from, to);
   }, [selectedRange]);
   
   // 处理日期范围变更
@@ -379,10 +533,12 @@ export default function TrafficPage() {
       
       setDateRange(range);
       setError(null); // 清除之前的错误提示
+      fetchRegistrationData(utcFrom, utcTo);
       fetchActiveUsersData(utcFrom, utcTo);
       fetchPageViewsData(utcFrom, utcTo);
       fetchDeviceTypeData(utcFrom, utcTo);
       fetchSessionData(utcFrom, utcTo);
+      fetchCountryData(utcFrom, utcTo);
     }
   };
 
@@ -482,7 +638,28 @@ export default function TrafficPage() {
       )}
 
       {/* Traffic Overview Section */}
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
+      <div className="grid gap-4 md:grid-cols-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">注册人数 ({dashboardData.currentLabel})</CardTitle>
+            <CardDescription className="text-2xl font-bold text-foreground flex items-center">
+              {registrationData && registrationData.data ? (
+                <>
+                  {registrationData.data.current_period.total_registrations.toLocaleString()}
+                  {registrationData.data.comparison && isFinite(registrationData.data.comparison.change_rate) && (
+                    <span className={`ml-2 text-xs font-medium ${registrationData.data.comparison.change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {registrationData.data.comparison.change_rate >= 0 ? '+' : ''}{registrationData.data.comparison.change_rate.toFixed(1)}%
+                      <span className="text-muted-foreground text-xs ml-1">(环比)</span>
+                    </span>
+                  )}
+                </>
+              ) : (
+                '加载中...'
+              )}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">访问人数 ({dashboardData.currentLabel})</CardTitle>
@@ -807,10 +984,10 @@ export default function TrafficPage() {
         </Card>
 
 
-        {/* 7. Geographic Distribution */}
+        {/* 7. Country Ranking */}
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">访问地区排名 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">访问国家排名 ({dashboardData.currentLabel})</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -818,37 +995,43 @@ export default function TrafficPage() {
                 <thead>
                   <tr className="border-b">
                     <th className="text-left pb-2">排名</th>
-                    <th className="text-left pb-2">地区</th>
+                    <th className="text-left pb-2">国家</th>
                     <th className="text-left pb-2">访问人数</th>
                     <th className="text-left pb-2">占比</th>
-                    <th className="text-left pb-2">平均停留时间</th>
-                    <th className="text-left pb-2">同比</th>
+                    <th className="text-left pb-2">环比</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[
-                    { region: '广东省', visits: Math.round(dashboardData.totalDAU * 0.22), stayTime: 195, change: 8.3 },
-                    { region: '北京市', visits: Math.round(dashboardData.totalDAU * 0.18), stayTime: 210, change: 5.5 },
-                    { region: '上海市', visits: Math.round(dashboardData.totalDAU * 0.16), stayTime: 187, change: 7.2 },
-                    { region: '江苏省', visits: Math.round(dashboardData.totalDAU * 0.12), stayTime: 165, change: -3.4 },
-                    { region: '浙江省', visits: Math.round(dashboardData.totalDAU * 0.09), stayTime: 178, change: 4.1 },
-                    { region: '四川省', visits: Math.round(dashboardData.totalDAU * 0.07), stayTime: 172, change: 2.8 },
-                    { region: '湖北省', visits: Math.round(dashboardData.totalDAU * 0.05), stayTime: 153, change: 1.7 },
-                    { region: '福建省', visits: Math.round(dashboardData.totalDAU * 0.04), stayTime: 144, change: -2.1 },
-                    { region: '山东省', visits: Math.round(dashboardData.totalDAU * 0.04), stayTime: 160, change: 3.9 },
-                    { region: '河南省', visits: Math.round(dashboardData.totalDAU * 0.03), stayTime: 148, change: 0.8 },
-                  ].map((item, index) => (
-                    <tr key={index} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="py-3">{index + 1}</td>
-                      <td className="py-3">{item.region}</td>
-                      <td className="py-3">{item.visits.toLocaleString()}</td>
-                      <td className="py-3">{((item.visits / dashboardData.totalDAU) * 100).toFixed(1)}%</td>
-                      <td className="py-3">{Math.floor(item.stayTime / 60)}分{item.stayTime % 60}秒</td>
-                      <td className={`py-3 ${item.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {item.change >= 0 ? '+' : ''}{item.change}%
+                  {countryData && countryData.current && countryData.current.countries ? (
+                    countryData.current.countries.slice(0, 10).map((country, index) => {
+                      // 查找对应的环比数据
+                      const changeData = countryData.comparison.country_changes.find(
+                        c => c.country_code === country.country_code
+                      );
+                      
+                      return (
+                        <tr key={index} className="border-b last:border-0 hover:bg-gray-50">
+                          <td className="py-3">{index + 1}</td>
+                          <td className="py-3">{country.country_name}</td>
+                          <td className="py-3">{country.user_count.toLocaleString()}</td>
+                          <td className="py-3">{country.percentage.toFixed(1)}%</td>
+                          <td className={`py-3 ${changeData && changeData.change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {changeData ? (
+                              <>
+                                {changeData.change_rate >= 0 ? '+' : ''}{changeData.change_rate.toFixed(1)}%
+                              </>
+                            ) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="py-3 text-center text-gray-500">
+                        加载中...
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>

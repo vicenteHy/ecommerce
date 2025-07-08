@@ -890,7 +890,7 @@ export default function DataOverviewPage() {
       type: 'linearGradient',
       colors: [
         { offset: 0, color: '#6366f1' },
-        { offset: 100, color: '#6366f1' },
+        { offset: 100, color: '#a5b4fc' },
       ],
     },
     {
@@ -898,7 +898,7 @@ export default function DataOverviewPage() {
       type: 'linearGradient',
       colors: [
         { offset: 0, color: '#a5b4fc' },
-        { offset: 100, color: '#a5b4fc' },
+        { offset: 100, color: '#e0e7ff' },
       ],
     },
   ];
@@ -1111,6 +1111,9 @@ export default function DataOverviewPage() {
                  data={salesData.combinedOrdersData}
                  keys={['current', 'comparison']}
                  indexBy="country"
+                 innerPadding={3}
+                 groupMode={'grouped'}
+                 borderRadius={5}
                  defs={gradientDefs}
                  fill={barFill}
                  enableLabel={false}
@@ -1175,14 +1178,22 @@ export default function DataOverviewPage() {
                  data={salesData.combinedAovData}
                  keys={['current', 'comparison']}
                  indexBy="label"
-                 margin={{ top: 10, right: 10, bottom: 40, left: 10 }}
+                 margin={{ top: 10, right: 10, bottom: 40, left: 50 }}
                  padding={0.3}
+                 innerPadding={3}
+                 groupMode={'grouped'}
+                 borderRadius={5}
                  defs={gradientDefs}
                  fill={barFill}
                  axisTop={null}
                  axisRight={null}
                  axisBottom={{
                    ...commonBarProps.axisBottom,
+                   tickSize: 5,
+                   tickPadding: 5,
+                   tickRotation: 0,
+                 }}
+                 axisLeft={{
                    tickSize: 5,
                    tickPadding: 5,
                    tickRotation: 0,
@@ -1427,6 +1438,9 @@ export default function DataOverviewPage() {
                 indexBy="metric"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
                 defs={gradientDefs}
                 fill={barFill}
                 axisBottom={{
@@ -1618,6 +1632,9 @@ export default function DataOverviewPage() {
                 indexBy="page"
                 margin={{ top: 10, right: 10, bottom: 50, left: 10 }}
                 padding={0.3}
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
                 defs={gradientDefs}
                 fill={barFill}
                 axisBottom={{

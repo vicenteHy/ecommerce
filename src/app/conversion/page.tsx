@@ -124,8 +124,8 @@ export default function ConversionPage() {
   const processFunnelData = (data: FunnelComparisonData) => {
     if (!data || !data.current || !data.current.funnel_steps) return null;
     
-    // 转换API数据为Nivo漏斗图格式
-    return data.current.funnel_steps.map((step, index) => {
+    // 转换API数据为Nivo漏斗图格式，只取前4个步骤
+    return data.current.funnel_steps.slice(0, 4).map((step, index) => {
       // 计算转化率百分比
       let conversionRate: number;
       if (step.conversion_rate === '-' || step.conversion_rate === '') {
@@ -152,12 +152,12 @@ export default function ConversionPage() {
         { title: '访问商品页', rate: 0, change: 0 },
         { title: '浏览商品详情', rate: 0, change: 0 },
         { title: '添加购物车', rate: 0, change: 0 },
-        { title: '进入结算', rate: 0, change: 0 },
-        { title: '支付完成', rate: 0, change: 0 }
+        { title: '进入结算', rate: 0, change: 0 }
       ];
     }
 
-    return funnelData.current.funnel_steps.map((step, index) => {
+    // 只取前4个步骤
+    return funnelData.current.funnel_steps.slice(0, 4).map((step, index) => {
       const currentRate = step.conversion_rate === '-' || step.conversion_rate === '' 
         ? 100 
         : parseFloat(step.conversion_rate.replace('%', ''));
@@ -436,7 +436,7 @@ export default function ConversionPage() {
       )}
 
       {/* Conversion Overview Section */}
-      <div className="grid gap-4 md:grid-cols-5 mb-6">
+      <div className="grid gap-4 md:grid-cols-4 mb-6">
         {getFunnelCardsData().map((cardData, index) => (
           <Card key={index}>
             <CardHeader className="pb-2">
@@ -480,11 +480,19 @@ export default function ConversionPage() {
               animate={true}
               motionConfig="gentle"
               isInteractive={true}
-              tooltip={({ part }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{part.data.label}</strong>: {part.data.value}%
-                </div>
-              )}
+              tooltip={({ part }) => {
+                // 查找对应的原始数据以显示用户数
+                const stepData = funnelData.current.funnel_steps.find(
+                  step => step.step.replace(/^\d+\./, '') === part.data.id
+                );
+                return (
+                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                    <strong>{part.data.id}</strong><br/>
+                    转化率: {part.data.value}%<br/>
+                    用户数: {stepData?.users.toLocaleString() || 0}
+                  </div>
+                )}
+              }
             />
           </CardContent>
         </Card>

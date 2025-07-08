@@ -861,7 +861,27 @@ export default function SalesPage() {
                 indexBy="category_name"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
-                defs={gradientDefs}
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
+                defs={[
+                  {
+                    id: 'gradientCurrent',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#6366f1' },
+                      { offset: 100, color: '#a5b4fc' },
+                    ],
+                  },
+                  {
+                    id: 'gradientComparison',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#a5b4fc' },
+                      { offset: 100, color: '#e0e7ff' },
+                    ],
+                  },
+                ]}
                 fill={[
                   { match: { id: 'current' }, id: 'gradientCurrent' },
                   { match: { id: 'comparison' }, id: 'gradientComparison' }
@@ -923,7 +943,27 @@ export default function SalesPage() {
                 indexBy="country"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
-                defs={gradientDefs}
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
+                defs={[
+                  {
+                    id: 'gradientCurrent',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#6366f1' },
+                      { offset: 100, color: '#a5b4fc' },
+                    ],
+                  },
+                  {
+                    id: 'gradientComparison',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#a5b4fc' },
+                      { offset: 100, color: '#e0e7ff' },
+                    ],
+                  },
+                ]}
                 fill={[
                   { match: { id: 'current' }, id: 'gradientCurrent' },
                   { match: { id: 'comparison' }, id: 'gradientComparison' }
@@ -972,15 +1012,49 @@ export default function SalesPage() {
             {salesData && salesData.current && salesData.current.payment_stats ? (
               <ResponsiveBar
                 {...commonBarProps}
-                data={Object.entries(salesData.current.payment_stats).map(([method, value]) => ({
-                  method: method,
-                  value: value
-                })).sort((a, b) => b.value - a.value)}
-                keys={['value']}
+                data={(() => {
+                  // 获取所有付款方式（当前和历史）
+                  const allMethods = new Set([
+                    ...Object.keys(salesData.current.payment_stats),
+                    ...Object.keys(salesData.previous.payment_stats || {})
+                  ]);
+                  
+                  // 创建对比数据
+                  return Array.from(allMethods).map(method => ({
+                    method: method,
+                    current: salesData.current.payment_stats[method] || 0,
+                    comparison: salesData.previous.payment_stats?.[method] || 0
+                  })).sort((a, b) => b.current - a.current);
+                })()}
+                keys={['current', 'comparison']}
                 indexBy="method"
                 margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
                 padding={0.3}
-                colors={['#6366f1']}
+                innerPadding={3}
+                groupMode={'grouped'}
+                borderRadius={5}
+                defs={[
+                  {
+                    id: 'gradientCurrent',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#6366f1' },
+                      { offset: 100, color: '#a5b4fc' },
+                    ],
+                  },
+                  {
+                    id: 'gradientComparison',
+                    type: 'linearGradient',
+                    colors: [
+                      { offset: 0, color: '#a5b4fc' },
+                      { offset: 100, color: '#e0e7ff' },
+                    ],
+                  },
+                ]}
+                fill={[
+                  { match: { id: 'current' }, id: 'gradientCurrent' },
+                  { match: { id: 'comparison' }, id: 'gradientComparison' }
+                ]}
                 axisBottom={{
                   tickSize: 5,
                   tickPadding: 5,
@@ -1001,15 +1075,31 @@ export default function SalesPage() {
                   },
                 }}
                 enableLabel={false}
+                legends={[]}
                 tooltip={({ id, value, indexValue, color, data }) => {
-                  // 计算总付款方式数量
+                  // 计算环比变化
+                  const currentValue = Number(data.current) || 0;
+                  const previousValue = Number(data.comparison) || 0;
+                  const change = previousValue > 0 ? ((currentValue - previousValue) / previousValue * 100) : 0;
+                  
+                  // 计算当前期间总付款方式数量用于百分比计算
                   const totalPaymentCount = Object.values(salesData.current.payment_stats).reduce((sum, val) => sum + (val as number), 0);
-                  const percentage = totalPaymentCount > 0 ? ((value / totalPaymentCount) * 100).toFixed(1) : '0.0';
+                  const percentage = totalPaymentCount > 0 ? ((currentValue / totalPaymentCount) * 100).toFixed(1) : '0.0';
                   
                   return (
                     <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
                       <strong>{indexValue}</strong><br />
-                      {value.toLocaleString()} ({percentage}%)
+                      {id === 'current' ? '当前' : '对比'}: {value.toLocaleString()}<br />
+                      {id === 'current' && (
+                        <>
+                          占比: {percentage}%<br />
+                          {previousValue > 0 && (
+                            <span style={{ color: change >= 0 ? 'green' : 'red' }}>
+                              环比: {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+                            </span>
+                          )}
+                        </>
+                      )}
                     </div>
                   );
                 }}
