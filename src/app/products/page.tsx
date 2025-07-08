@@ -8,6 +8,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
@@ -51,6 +57,71 @@ interface SalesComparisonData {
     previous_total: number;
     total_change_rate: number;
   };
+}
+
+// 定义加购数据接口
+interface CartQuantityComparison {
+  current: {
+    start_date: string;
+    end_date: string;
+    total_unique_users: number;
+    total_cart_events: number;
+    total_quantity: number;
+    avg_quantity_per_event: number;
+    avg_quantity_per_user: number;
+  };
+  previous: {
+    start_date: string;
+    end_date: string;
+    total_unique_users: number;
+    total_cart_events: number;
+    total_quantity: number;
+    avg_quantity_per_event: number;
+    avg_quantity_per_user: number;
+  };
+  comparison: {
+    unique_users: {
+      current: number;
+      previous: number;
+      change: number;
+      change_rate: number;
+    };
+    cart_events: {
+      current: number;
+      previous: number;
+      change: number;
+      change_rate: number;
+    };
+    total_quantity: {
+      current: number;
+      previous: number;
+      change: number;
+      change_rate: number;
+    };
+    avg_quantity_per_event: {
+      current: number;
+      previous: number;
+      change: number;
+      change_rate: number;
+    };
+    avg_quantity_per_user: {
+      current: number;
+      previous: number;
+      change: number;
+      change_rate: number;
+    };
+  };
+  daily_comparison: Array<{
+    date: string;
+    unique_users: number;
+    cart_events: number;
+    total_quantity: number;
+    previous_unique_users: number;
+    previous_cart_events: number;
+    previous_total_quantity: number;
+    quantity_change: number;
+    quantity_change_rate: number;
+  }>;
 }
 
 // 定义类别销量数据接口
@@ -106,11 +177,44 @@ interface CategoryViewComparison {
   comparison: CategoryViewItem[];
 }
 
+// 定义热销商品数据接口
+interface BestsellerItem {
+  rank: number;
+  offer_id: string;
+  product_name: string;
+  category_name: string;
+  product_image: string;
+  total_quantity: number;
+  total_revenue_cny: number;
+  total_revenue_original: number;
+  original_currency: string;
+  order_count: number;
+  avg_unit_price_cny: number;
+  price_range_cny: {
+    min: number;
+    max: number;
+  };
+}
+
+interface BestsellersData {
+  data: BestsellerItem[];
+  summary: {
+    start_date: string;
+    end_date: string;
+    sort_by: string;
+    total_products: number;
+    total_quantity_sold: number;
+    total_revenue_cny: number;
+    total_orders: number;
+  };
+}
+
 // 定义处理后的图表数据接口
 interface ProcessedProductData {
   salesComparison: SalesComparisonData;
   categorySalesData: CategorySalesComparison | null;
   categoryViewData: CategoryViewComparison | null;
+  cartData: CartQuantityComparison | null;
   lineChartSalesData: Array<{
     id: string;
     data: Array<{
@@ -131,6 +235,8 @@ interface ProcessedProductData {
   // 保留其他可能需要的数据结构
   totalSales: number;
   salesChange: number;
+  totalCartQuantity: number;
+  cartQuantityChange: number;
 }
 
 export default function ProductsPage() {
@@ -141,10 +247,19 @@ export default function ProductsPage() {
   const [categorySalesData, setCategorySalesData] = useState<CategorySalesComparison | null>(null);
   // 新增类别浏览量数据状态
   const [categoryViewData, setCategoryViewData] = useState<CategoryViewComparison | null>(null);
+  // 新增加购数据状态
+  const [cartData, setCartData] = useState<CartQuantityComparison | null>(null);
   // 新增日期范围选择状态
   const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
+  // 新增热销商品状态
+  const [bestsellersData, setBestsellersData] = useState<BestsellersData | null>(null);
+  const [bestsellersSort, setBestsellersSort] = useState<string>('quantity');
+  const [bestsellersLimit, setBestsellersLimit] = useState<number>(20);
+  const [bestsellersLoading, setBestsellersLoading] = useState<boolean>(false);
+  // 新增图片预览状态
+  const [previewImage, setPreviewImage] = useState<{url: string; name: string} | null>(null);
 
   // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
   const formatDate = (date: Date): string => {
@@ -161,7 +276,7 @@ export default function ProductsPage() {
   };
   
   // 处理商品数据和图表数据转换
-  const processProductData = (data: SalesComparisonData, categoryData: CategorySalesComparison | null, viewData: CategoryViewComparison | null): ProcessedProductData | null => {
+  const processProductData = (data: SalesComparisonData, categoryData: CategorySalesComparison | null, viewData: CategoryViewComparison | null, cartData: CartQuantityComparison | null): ProcessedProductData | null => {
     if (!data) return null;
     
     // 准备商品销量图表数据
@@ -222,14 +337,46 @@ export default function ProductsPage() {
       salesComparison: data,
       categorySalesData: categoryData,
       categoryViewData: viewData,
+      cartData: cartData,
       lineChartSalesData: prepareSalesChartData(),
       categorySalesBarData: prepareCategorySalesBarData(),
       categoryViewBarData: prepareCategoryViewBarData(),
       totalSales: data.summary.current_total,
-      salesChange: data.summary.total_change_rate
+      salesChange: data.summary.total_change_rate,
+      totalCartQuantity: cartData?.current?.total_quantity || 0,
+      cartQuantityChange: cartData?.comparison?.total_quantity?.change_rate || 0
     };
   };
   
+  // 获取热销商品数据
+  const fetchBestsellersData = async (from: Date, to: Date, sort: string, limit: number) => {
+    setBestsellersLoading(true);
+    try {
+      const startDate = formatDate(from);
+      const endDate = formatDate(to);
+      
+      const response = await fetch(
+        `http://localhost:8000/product/bestsellers?start_date=${startDate}&end_date=${endDate}&sort_by=${sort}&limit=${limit}`,
+        {
+          headers: {
+            'accept': 'application/json'
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`热销商品数据 HTTP error! status: ${response.status}`);
+      }
+      
+      const data: BestsellersData = await response.json();
+      setBestsellersData(data);
+    } catch (err) {
+      console.error('获取热销商品数据错误:', err);
+    } finally {
+      setBestsellersLoading(false);
+    }
+  };
+
   // 获取真实的商品销量数据
   const fetchProductData = async (from: Date, to: Date) => {
     setError(null);
@@ -238,8 +385,8 @@ export default function ProductsPage() {
       const startDate = formatDate(from);
       const endDate = formatDate(to);
       
-      // 并行调用三个API
-      const [salesResponse, categoryResponse, viewResponse] = await Promise.all([
+      // 并行调用四个API
+      const [salesResponse, categoryResponse, viewResponse, cartResponse] = await Promise.all([
         // 获取销量数据
         fetch(
           `http://localhost:8000/sales/items-sold/comparison?start_date=${startDate}&end_date=${endDate}`,
@@ -266,6 +413,15 @@ export default function ProductsPage() {
               'accept': 'application/json'
             }
           }
+        ),
+        // 获取加购数据
+        fetch(
+          `http://localhost:8000/product/cart/quantity/comparison?start_date=${startDate}&end_date=${endDate}`,
+          {
+            headers: {
+              'accept': 'application/json'
+            }
+          }
         )
       ]);
       
@@ -281,17 +437,24 @@ export default function ProductsPage() {
         throw new Error(`类别浏览量数据 HTTP error! status: ${viewResponse.status}`);
       }
       
+      if (!cartResponse.ok) {
+        throw new Error(`加购数据 HTTP error! status: ${cartResponse.status}`);
+      }
+      
       const salesData: SalesComparisonData = await salesResponse.json();
       const categoryData: CategorySalesComparison = await categoryResponse.json();
       const viewData: CategoryViewComparison = await viewResponse.json();
+      const cartData: CartQuantityComparison = await cartResponse.json();
       
       // 设置类别销量数据
       setCategorySalesData(categoryData);
       // 设置类别浏览量数据
       setCategoryViewData(viewData);
+      // 设置加购数据
+      setCartData(cartData);
       
       // 处理数据
-      const processedData = processProductData(salesData, categoryData, viewData);
+      const processedData = processProductData(salesData, categoryData, viewData, cartData);
       setProductData(processedData);
       
     } catch (err) {
@@ -306,6 +469,13 @@ export default function ProductsPage() {
     const generatedData = generateDataForRange('today');
     setDashboardData(generatedData);
   }, []);
+  
+  // 监听排序方式和数量变化
+  useEffect(() => {
+    if (dateRange.from && dateRange.to) {
+      fetchBestsellersData(dateRange.from, dateRange.to, bestsellersSort, bestsellersLimit);
+    }
+  }, [bestsellersSort, bestsellersLimit]);
   
   // 处理日期范围变更
   const handleDateRangeChange = (from: Date, to: Date) => {
@@ -328,6 +498,7 @@ export default function ProductsPage() {
     setDashboardData(generatedData);
     
     fetchProductData(from, to);
+    fetchBestsellersData(from, to, bestsellersSort, bestsellersLimit);
   };
 
   if (!dashboardData) {
@@ -401,12 +572,12 @@ export default function ProductsPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">总加购量（商品）({dashboardData.currentLabel})</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-              {productData && productData.totalSales !== undefined ? (
+              {productData && productData.totalCartQuantity !== undefined ? (
                 <>
-                  {Math.floor(productData.totalSales * 2.5).toLocaleString()}
-                  {isFinite(productData.salesChange) && (
-                    <span className={`ml-2 text-xs font-medium ${productData.salesChange - 1 >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {productData.salesChange - 1 >= 0 ? '+' : ''}{(productData.salesChange - 1).toFixed(1)}%
+                  {productData.totalCartQuantity.toLocaleString()}
+                  {isFinite(productData.cartQuantityChange) && (
+                    <span className={`ml-2 text-xs font-medium ${productData.cartQuantityChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {productData.cartQuantityChange >= 0 ? '+' : ''}{productData.cartQuantityChange.toFixed(1)}%
                       <span className="text-muted-foreground text-xs ml-1">(环比)</span>
                     </span>
                   )}
@@ -728,29 +899,85 @@ export default function ProductsPage() {
         {/* 7. 热销商品排名 */}
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">热销商品排名 ({dashboardData.currentLabel})</CardTitle>
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-sm font-medium text-muted-foreground">热销商品排名 ({dashboardData.currentLabel})</CardTitle>
+              <div className="flex gap-2">
+                <select 
+                  value={bestsellersSort}
+                  onChange={(e) => setBestsellersSort(e.target.value)}
+                  className="px-3 py-1 text-sm border rounded-md bg-white"
+                >
+                  <option value="quantity">按销量</option>
+                  <option value="revenue">按销售额</option>
+                  <option value="orders">按订单数</option>
+                </select>
+                <select 
+                  value={bestsellersLimit}
+                  onChange={(e) => setBestsellersLimit(Number(e.target.value))}
+                  className="px-3 py-1 text-sm border rounded-md bg-white"
+                >
+                  <option value={10}>10条</option>
+                  <option value={20}>20条</option>
+                  <option value={50}>50条</option>
+                </select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b">
-                    <th className="text-left pb-2">排名</th>
-                    <th className="text-left pb-2">商品名称</th>
-                    <th className="text-left pb-2">类别</th>
-                    <th className="text-left pb-2">单价</th>
-                    <th className="text-left pb-2">销量</th>
-                    <th className="text-left pb-2">浏览量</th>
-                    <th className="text-left pb-2">转化率</th>
+                  <tr className="border-b text-sm">
+                    <th className="text-left pb-2 pr-2">排名</th>
+                    <th className="text-left pb-2 pr-2">商品图片</th>
+                    <th className="text-left pb-2 pr-2">商品ID</th>
+                    <th className="text-left pb-2 pr-2 min-w-[200px]">商品名称</th>
+                    <th className="text-left pb-2 pr-2">类别</th>
+                    <th className="text-left pb-2 pr-2">销量</th>
+                    <th className="text-left pb-2 pr-2">销售额</th>
+                    <th className="text-left pb-2 pr-2">订单数</th>
+                    <th className="text-left pb-2 pr-2">均价</th>
+                    <th className="text-left pb-2">价格区间</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {/* 暂时显示模拟数据提示 */}
-                  <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-500">
-                      暂无热销商品数据
-                    </td>
-                  </tr>
+                  {bestsellersData ? (
+                    bestsellersData.data.map((item) => (
+                      <tr key={item.offer_id} className="border-b hover:bg-gray-50">
+                        <td className="py-2 pr-2 text-sm">{item.rank}</td>
+                        <td className="py-2 pr-2">
+                          <img 
+                            src={item.product_image} 
+                            alt={item.product_name}
+                            className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                            onClick={() => setPreviewImage({url: item.product_image, name: item.product_name})}
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = '/placeholder.png';
+                            }}
+                          />
+                        </td>
+                        <td className="py-2 pr-2 text-sm font-mono">{item.offer_id}</td>
+                        <td className="py-2 pr-2 text-sm max-w-[300px] truncate" title={item.product_name}>
+                          {item.product_name}
+                        </td>
+                        <td className="py-2 pr-2 text-sm">{item.category_name}</td>
+                        <td className="py-2 pr-2 text-sm font-medium">{item.total_quantity.toLocaleString('zh-CN')}</td>
+                        <td className="py-2 pr-2 text-sm font-medium">¥{item.total_revenue_cny.toFixed(2)}</td>
+                        <td className="py-2 pr-2 text-sm">{item.order_count}</td>
+                        <td className="py-2 pr-2 text-sm">¥{item.avg_unit_price_cny.toFixed(2)}</td>
+                        <td className="py-2 text-sm">
+                          ¥{item.price_range_cny.min.toFixed(2)} - ¥{item.price_range_cny.max.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={10} className="py-4 text-center text-gray-500">
+                        {bestsellersLoading ? '加载中...' : '暂无热销商品数据'}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -758,6 +985,28 @@ export default function ProductsPage() {
         </Card>
 
       </div>
+
+      {/* 图片预览模态框 */}
+      <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewImage?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center items-center p-4">
+            {previewImage && (
+              <img 
+                src={previewImage.url} 
+                alt={previewImage.name}
+                className="max-w-full max-h-[70vh] object-contain"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = '/placeholder.png';
+                }}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

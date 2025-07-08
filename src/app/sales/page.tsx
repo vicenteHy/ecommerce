@@ -11,15 +11,8 @@ import {
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { format } from "date-fns";
-import { DateRangePicker, DateRange } from "@/components/ui/date-range-picker";
+import { DateTimeSelector } from "@/components/date-time-selector";
 
 
 // 定义Sales数据接口
@@ -137,7 +130,6 @@ interface SalesComparisonData {
 }
 
 export default function SalesPage() {
-  const [selectedRange, setSelectedRange] = useState<string>('today');
   // 新增销售数据状态
   const [salesData, setSalesData] = useState<SalesComparisonData | null>(null);
   // 新增商品销量数据状态
@@ -145,11 +137,7 @@ export default function SalesPage() {
   // 新增品类销售数据状态
   const [categoriesData, setCategoriesData] = useState<CategoriesComparisonData | null>(null);
   // 新增日期范围选择状态
-  // 设置默认日期范围：今天往前推30天
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 30);
-  const [dateRange, setDateRange] = useState<DateRange>({from: thirtyDaysAgo, to: today});
+  const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
@@ -436,51 +424,11 @@ export default function SalesPage() {
     }
   };
   
-  useEffect(() => {
-    console.log("Selected range changed:", selectedRange);
-    
-    // 根据选择的范围设置日期
-    const now = new Date();
-    let from = new Date();
-    let to = new Date();
-    
-    switch (selectedRange) {
-      case 'last_7_days':
-        from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0);
-        to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-        break;
-      case 'last_30_days':
-        from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0);
-        to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-        break;
-      case 'last_6_months':
-        from = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0);
-        to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-        break;
-      default: // 'today'
-        // 对于今天，使用今天的0点到23:59
-        from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-        to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-        break;
-    }
-    
-    setDateRange({from, to} as DateRange);
-    console.log('设置日期范围:', {from: formatDate(from), to: formatDate(to)});
-    fetchSalesData(from, to);
-    fetchItemsSoldData(from, to);
-    fetchCategoriesData(from, to);
-  }, [selectedRange]);
-  
   // 处理日期范围变更
   const handleDateRangeChange = (from: Date, to: Date) => {
-    // 检查日期范围是否合理
-    if (from > to) {
-      setError('起始日期不能大于结束日期');
-      return;
-    }
-    
     setDateRange({from, to});
     setError(null); // 清除之前的错误提示
+    
     fetchSalesData(from, to);
     fetchItemsSoldData(from, to);
     fetchCategoriesData(from, to);
@@ -568,52 +516,7 @@ export default function SalesPage() {
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">销售数据</h1>
-        <div className="flex gap-4 items-center">
-          {/* 添加日期选择器 */}
-          <DateRangePicker 
-            dateRange={dateRange} 
-            onRangeChange={(range) => {
-              // 只更新UI状态，不发送请求
-              setDateRange(range);
-            }} 
-            placeholder="选择日期范围"
-            onConfirm={(range) => {
-              // 检查日期范围是否合理
-              if (range.from > range.to) {
-                setError('起始日期不能大于结束日期');
-                return;
-              }
-              
-              // 检查是否选择了未来日期
-              const now = new Date();
-              if (range.from > now) {
-                setError('开始日期不能是未来日期，请选择当前或过去的日期');
-                return;
-              }
-              
-              if (range.to > now) {
-                // 如果结束日期是未来，调整为今天
-                const adjustedTo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-                setDateRange({from: range.from, to: adjustedTo});
-                handleDateRangeChange(range.from, adjustedTo);
-              } else {
-                // 发送请求
-                handleDateRangeChange(range.from, range.to);
-              }
-            }}
-          />
-          <Select value={selectedRange} onValueChange={setSelectedRange}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="选择时间范围" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">今天</SelectItem>
-              <SelectItem value="last_7_days">近7天</SelectItem>
-              <SelectItem value="last_30_days">近30天</SelectItem>
-              <SelectItem value="last_6_months">近6个月</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <DateTimeSelector onDateRangeChange={handleDateRangeChange} defaultRange="last_30_days" />
       </div>
       
       {error && (
