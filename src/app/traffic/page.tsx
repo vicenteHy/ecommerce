@@ -40,21 +40,24 @@ interface ActiveUsersComparisonData {
 }
 
 // 定义注册数据接口
+interface DailyRegistrationData {
+  date: string;
+  registrations: number;
+}
+
+interface RegistrationPeriodData {
+  start: string;
+  end: string;
+  total_registrations: number;
+  average_daily: number;
+  daily_data?: DailyRegistrationData[];
+}
+
 interface RegistrationComparisonData {
   status: string;
   data: {
-    current_period: {
-      start: string;
-      end: string;
-      total_registrations: number;
-      average_daily: number;
-    };
-    previous_period: {
-      start: string;
-      end: string;
-      total_registrations: number;
-      average_daily: number;
-    };
+    current_period: RegistrationPeriodData;
+    previous_period: RegistrationPeriodData;
     comparison: {
       total_change: number;
       change_rate: number;
@@ -332,38 +335,98 @@ export default function TrafficPage() {
         return `${year}-${month}-${day} 00:00:00`;
       };
       
-      const url = `http://localhost:8000/registration/comparison?current_start_date=${formatDateTime(from)}&current_end_date=${formatDateTime(to)}`;
-      console.log('请求注册数据URL:', url);
+      const formatDateTimeWithHour = (date: Date): string => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day} 23:59:59`;
+      };
       
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        mode: 'cors',
-      });
+      // 并行获取对比数据和每日数据
+      const [comparisonResponse, dailyResponse] = await Promise.all([
+        // 获取对比数据
+        fetch(
+          `http://localhost:8000/registration/comparison?current_start_date=${formatDateTime(from)}&current_end_date=${formatDateTime(to)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors',
+          }
+        ),
+        // 获取每日数据
+        fetch(
+          `http://localhost:8000/registration/daily?start_date=${formatDateTime(from)}&end_date=${formatDateTimeWithHour(to)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors',
+          }
+        )
+      ]);
       
-      if (!response.ok) {
-        throw new Error(`请求失败: ${response.status}`);
+      if (!comparisonResponse.ok) {
+        throw new Error(`对比数据请求失败: ${comparisonResponse.status}`);
       }
       
-      const textData = await response.text();
-      let data;
-      try {
-        data = JSON.parse(textData);
-      } catch (parseError) {
-        console.error('解析注册数据JSON失败:', parseError);
-        return;
-      }
+      const comparisonData = await comparisonResponse.json();
+      console.log('注册对比数据:', comparisonData);
       
-      console.log('注册数据:', data);
+      // 处理每日数据
+      if (dailyResponse.ok) {
+        const dailyData = await dailyResponse.json();
+        console.log('每日注册数据:', dailyData);
+        
+        if (dailyData && dailyData.status === 'success' && dailyData.data && dailyData.data.daily_data) {
+          // 将每日数据合并到对比数据中
+          if (comparisonData && comparisonData.status === 'success' && comparisonData.data) {
+            comparisonData.data.current_period.daily_data = dailyData.data.daily_data;
+            
+            // 获取对比期的每日数据
+            const days = dailyData.data.daily_data.length;
+            const previousStartDate = new Date(from);
+            previousStartDate.setDate(previousStartDate.getDate() - days);
+            const previousEndDate = new Date(from);
+            previousEndDate.setDate(previousEndDate.getDate() - 1);
+            
+            try {
+              const previousDailyResponse = await fetch(
+                `http://localhost:8000/registration/daily?start_date=${formatDateTime(previousStartDate)}&end_date=${formatDateTimeWithHour(previousEndDate)}`,
+                {
+                  method: 'GET',
+                  headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                  },
+                  mode: 'cors',
+                }
+              );
+              
+              if (previousDailyResponse.ok) {
+                const previousDailyData = await previousDailyResponse.json();
+                if (previousDailyData && previousDailyData.status === 'success' && previousDailyData.data) {
+                  comparisonData.data.previous_period.daily_data = previousDailyData.data.daily_data;
+                }
+              }
+            } catch (err) {
+              console.error('获取对比期每日数据错误:', err);
+            }
+          }
+        }
+      }
       
       // 检查数据格式
-      const isValidData = data && typeof data === 'object' && 'status' in data && data.status === 'success' && 'data' in data;
+      const isValidData = comparisonData && typeof comparisonData === 'object' && 
+                         'status' in comparisonData && comparisonData.status === 'success' && 
+                         'data' in comparisonData;
       
       if (isValidData) {
-        setRegistrationData(data);
+        setRegistrationData(comparisonData);
       } else {
         console.log('注册数据格式不正确');
       }
@@ -550,7 +613,7 @@ export default function TrafficPage() {
       <div className="grid gap-4 md:grid-cols-4 mb-6">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">注册人数 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">注册人数</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {registrationData && registrationData.data ? (
                 <>
@@ -571,7 +634,7 @@ export default function TrafficPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">访问人数 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">访问人数</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {activeUsersData && activeUsersData.current ? (
                 <>
@@ -592,7 +655,7 @@ export default function TrafficPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">页面浏览量 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">页面浏览量</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {pageViewsData && pageViewsData.current ? (
                 <>
@@ -613,7 +676,7 @@ export default function TrafficPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时长 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时长</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {sessionData && sessionData.current ? (
                 <>
@@ -635,10 +698,135 @@ export default function TrafficPage() {
 
       {/* Detailed Traffic Visualizations */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
-        {/* 1. Visits Over Time */}
+        {/* 1. Registration Trend */}
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">访问趋势 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">注册人数趋势</CardTitle>
+          </CardHeader>
+          <CardContent className="h-80">
+            {registrationData && registrationData.data ? (
+              (dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) < 86400000) ? (
+                // 今天的数据显示为大数字
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="text-6xl font-bold text-black mb-4">
+                    {registrationData.data.current_period.total_registrations.toLocaleString()}
+                  </div>
+                  <div className="text-xl text-gray-600 mb-2">
+                    今日注册人数
+                  </div>
+                  {registrationData.data.comparison && isFinite(registrationData.data.comparison.change_rate) && (
+                    <div className={`mt-4 text-lg font-medium ${
+                      registrationData.data.comparison.change_rate >= 0 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {registrationData.data.comparison.change_rate >= 0 ? '↑' : '↓'} 
+                      {' '}{Math.abs(registrationData.data.comparison.change_rate).toFixed(1)}%
+                      <span className="text-sm text-gray-500 ml-2">环比</span>
+                    </div>
+                  )}
+                </div>
+              ) : registrationData.data.current_period.daily_data ? (
+                // 其他时间范围显示曲线图
+                <ResponsiveLine
+                  key={`registration-line-real-data`}
+                  data={[
+                    {
+                      id: '当前时段',
+                      data: registrationData.data.current_period.daily_data.map(item => ({
+                        x: new Date(item.date),
+                        y: item.registrations
+                      }))
+                    },
+                    {
+                      id: '对比时段',
+                      data: (registrationData.data.previous_period.daily_data || []).map(item => ({
+                        x: new Date(item.date),
+                        y: item.registrations
+                      }))
+                    }
+                  ]}
+                  colors={['#6366f1', '#a5b4fc']}
+                  lineWidth={2}
+                  enablePoints={true}
+                  pointSize={4}
+                  pointBorderWidth={2}
+                  pointBorderColor={{ from: 'serieColor' }}
+                  useMesh={true}
+                  enableGridX={false}
+                  enableGridY={true}
+                  xScale={{ type: 'time', precision: 'day' }}
+                  xFormat="time:%Y-%m-%d"
+                  yScale={{ type: 'linear', min: 0, max: 'auto' }}
+                  margin={{ top: 20, right: 110, bottom: 50, left: 60 }}
+                  axisBottom={{
+                    tickSize: 5,
+                    tickPadding: 5,
+                    tickRotation: -45,
+                    format: '%m/%d',
+                    tickValues: registrationData.data.current_period.daily_data.length > 7 ? 
+                      'every 3 days' : 'every day'
+                  }}
+                  axisLeft={{
+                    tickSize: 5,
+                    tickPadding: 5,
+                    tickRotation: 0,
+                    format: (v) => {
+                      if (typeof v !== 'number') return String(v);
+                      if (v >= 10000) {
+                        return `${(v / 10000).toFixed(1)}万`;
+                      } else if (v >= 1000) {
+                        return `${(v / 1000).toFixed(1)}千`;
+                      }
+                      return String(v);
+                    },
+                  }}
+                  tooltip={({ point }) => (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{format(new Date(point.data.x as Date), 'MM月dd日')}</strong><br />
+                      {point.serieId}: {point.data.y} 人
+                    </div>
+                  )}
+                  legends={[
+                    {
+                      anchor: 'bottom-right',
+                      direction: 'column',
+                      justify: false,
+                      translateX: 100,
+                      translateY: 0,
+                      itemsSpacing: 0,
+                      itemDirection: 'left-to-right',
+                      itemWidth: 80,
+                      itemHeight: 20,
+                      itemOpacity: 0.75,
+                      symbolSize: 12,
+                      symbolShape: 'circle',
+                      effects: [
+                        {
+                          on: 'hover',
+                          style: {
+                            itemOpacity: 1
+                          }
+                        }
+                      ]
+                    }
+                  ]}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  加载中...
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                加载中...
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 2. Visits Over Time */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">访问趋势</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             {/* 使用真实API数据 */}
@@ -762,10 +950,10 @@ export default function TrafficPage() {
           </CardContent>
         </Card>
 
-        {/* 2. Traffic Sources */}
+        {/* 3. Traffic Sources */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">流量来源分布 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">流量来源分布</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             <ResponsivePie
@@ -827,10 +1015,10 @@ export default function TrafficPage() {
           </CardContent>
         </Card>
 
-        {/* 3. Device Distribution */}
+        {/* 4. Device Distribution */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">设备类型分布 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">设备类型分布</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             {deviceData ? (
@@ -879,8 +1067,7 @@ export default function TrafficPage() {
                 tooltip={({ datum }) => (
                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
                     <strong>{datum.id}</strong><br />
-                    {datum.value}%<br />
-                    数量: {datum.data.count?.toLocaleString() || 0}
+                    {datum.value}%
                   </div>
                 )}
               />
@@ -893,10 +1080,10 @@ export default function TrafficPage() {
         </Card>
 
 
-        {/* 7. Country Ranking */}
+        {/* 5. Country Ranking */}
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">访问国家排名 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">访问国家排名</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">

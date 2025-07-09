@@ -8,11 +8,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveFunnel } from '@nivo/funnel';
-import { ResponsiveSankey } from '@nivo/sankey';
 // Import the data generation function and type
 import { generateDataForRange, DashboardData } from '../../lib/dashboard-data';
 import { DateTimeSelector } from "@/components/date-time-selector";
@@ -42,14 +47,86 @@ interface FunnelComparisonData {
   };
 }
 
+// 定义产品转化率数据接口
+interface ProductConversionData {
+  rank: number;
+  product_id: string;
+  product_name: string;
+  viewed_users: number;
+  purchased_users: number;
+  conversion_rate: number;
+}
+
+interface ProductConversionResponse {
+  data: ProductConversionData[];
+  summary: {
+    start_date: string;
+    end_date: string;
+    total_products: number;
+    avg_conversion_rate: number;
+    total_viewed_users: number;
+    total_purchased_users: number;
+  };
+}
+
+interface ProductConversionComparison {
+  product_id: string;
+  product_name: string;
+  sku_image: string;
+  current_conversion_rate: number;
+  previous_conversion_rate: number;
+  rate_change: number;
+  current_viewed_users: number;
+  previous_viewed_users: number;
+  current_purchased_users: number;
+  previous_purchased_users: number;
+  rank: number;
+}
+
+// 定义产品转化率趋势数据接口
+interface ConversionTrendDaily {
+  date: string;
+  viewed_users: number;
+  purchased_users: number;
+  conversion_rate: number;
+}
+
+interface ConversionTrendPeriod {
+  daily_data: ConversionTrendDaily[];
+  summary: {
+    avg_conversion_rate: number;
+    total_viewed_users: number;
+    total_purchased_users: number;
+  };
+}
+
+interface ConversionTrendComparison {
+  current: ConversionTrendPeriod;
+  previous: ConversionTrendPeriod;
+  comparison: {
+    avg_conversion_rate_change: number;
+    avg_conversion_rate_change_rate: number;
+    total_viewed_change: number;
+    total_purchased_change: number;
+  };
+}
+
 export default function ConversionPage() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   // 新增转化漏斗数据状态
   const [funnelData, setFunnelData] = useState<FunnelComparisonData | null>(null);
+  // 新增产品转化率数据状态
+  const [productConversionData, setProductConversionData] = useState<ProductConversionResponse | null>(null);
+  // 新增产品转化率对比数据状态
+  const [productComparisonData, setProductComparisonData] = useState<ProductConversionComparison[] | null>(null);
   // 新增日期范围状态，用于显示
   const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
+  // 新增图片预览状态
+  const [previewImage, setPreviewImage] = useState<{url: string; name: string} | null>(null);
+  // 新增产品转化率趋势数据状态
+  const [conversionTrendData, setConversionTrendData] = useState<ConversionTrendComparison | null>(null);
 
   // 格式化日期为 YYYY-MM-DD 格式
   const formatDate = (date: Date): string => {
@@ -105,6 +182,78 @@ export default function ConversionPage() {
       }
     } catch (err) {
       console.error('获取转化漏斗数据错误:', err);
+    }
+  };
+
+  // 获取产品转化率数据
+  const fetchProductConversionData = async (from: Date, to: Date) => {
+    try {
+      // 获取产品转化率数据
+      const url = `http://localhost:8000/product/conversion-rate?start_date=${formatDate(from)}&end_date=${formatDate(to)}&limit=10`;
+      console.log('请求产品转化率数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('产品转化率数据:', data);
+      setProductConversionData(data);
+      
+      // 获取产品转化率对比数据
+      const comparisonUrl = `http://localhost:8000/product/conversion-rate/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}&limit=10`;
+      const comparisonResponse = await fetch(comparisonUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (comparisonResponse.ok) {
+        const comparisonData = await comparisonResponse.json();
+        console.log('产品转化率对比数据:', comparisonData);
+        setProductComparisonData(comparisonData.comparison || []);
+      }
+    } catch (err) {
+      console.error('获取产品转化率数据错误:', err);
+    }
+  };
+
+  // 获取产品转化率趋势数据
+  const fetchConversionTrendData = async (from: Date, to: Date) => {
+    try {
+      const url = `http://localhost:8000/product/conversion-trend/comparison?start_date=${formatDate(from)}&end_date=${formatDate(to)}`;
+      console.log('请求产品转化率趋势数据URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('产品转化率趋势数据:', data);
+      setConversionTrendData(data);
+    } catch (err) {
+      console.error('获取产品转化率趋势数据错误:', err);
     }
   };
 
@@ -186,7 +335,21 @@ export default function ConversionPage() {
     
     // 获取转化漏斗数据
     fetchFunnelData(from, to);
+    // 获取产品转化率数据
+    fetchProductConversionData(from, to);
+    // 获取产品转化率趋势数据
+    fetchConversionTrendData(from, to);
   };
+
+  // 初始化时设置默认数据
+  useEffect(() => {
+    const generatedData = generateDataForRange('today');
+    setDashboardData(generatedData);
+    // 获取今天的数据
+    const today = new Date();
+    fetchProductConversionData(today, today);
+    fetchConversionTrendData(today, today);
+  }, []);
 
   if (!dashboardData) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
@@ -210,13 +373,14 @@ export default function ConversionPage() {
     conversionAxisBottom.format = dashboardData.xAxisFormat;
 
     // Set tick values based on date range
-    if (selectedRange === 'last_7_days' && dataLength > 0) {
+    const daysDiff = Math.floor((dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysDiff <= 7 && dataLength > 0) {
       const dateTicks = currentSalesData
         .map(d => d.x)
         .filter((x): x is Date => x instanceof Date);
       const uniqueDateTicks = Array.from(new Set(dateTicks.map(d => d.getTime()))).map(t => new Date(t));
       conversionAxisBottom.tickValues = uniqueDateTicks;
-    } else if (selectedRange === 'last_30_days') {
+    } else if (daysDiff <= 30) {
       conversionAxisBottom.tickValues = 'every 7 days';
     } else if (dataLength > 8) {
       conversionAxisBottom.tickValues = 'every 2 days';
@@ -240,39 +404,57 @@ export default function ConversionPage() {
     delete conversionAxisBottom.tickValues;
   }
 
-  // Create conversion rate trend data (based on DAU data with modifications)
-  const conversionRateTrendData = [
-    {
-      id: "当前转化率",
-      data: dashboardData.dauChartData[0].data.map(item => ({
-        x: item.x,
-        y: typeof item.y === 'number' 
-          ? (dashboardData.conversionRate + (Math.random() * 2 - 1)) // Add noise to conversion rate
-          : 0
-      }))
-    },
-    {
-      id: "对比期转化率",
-      data: dashboardData.dauChartData[1].data.map(item => ({
-        x: item.x,
-        y: typeof item.y === 'number' 
-          ? (dashboardData.conversionRateYesterday + (Math.random() * 2 - 1)) // Add noise to conversion rate
-          : 0
-      }))
+  // Process conversion trend data for the chart
+  const processConversionTrendData = () => {
+    if (!conversionTrendData) {
+      // Fallback to mock data if no real data available
+      return [
+        {
+          id: "当前转化率",
+          data: dashboardData.dauChartData[0].data.map(item => ({
+            x: item.x,
+            y: typeof item.y === 'number' 
+              ? (dashboardData.conversionRate + (Math.random() * 2 - 1))
+              : 0
+          }))
+        },
+        {
+          id: "对比期转化率",
+          data: dashboardData.dauChartData[1].data.map(item => ({
+            x: item.x,
+            y: typeof item.y === 'number' 
+              ? (dashboardData.conversionRateYesterday + (Math.random() * 2 - 1))
+              : 0
+          }))
+        }
+      ];
     }
-  ];
 
-  // Create page conversion rates data
-  const pageConversionRatesData = [
-    { page: '首页', conversionRate: 45, previousRate: 42 },
-    { page: '产品列表页', conversionRate: 28, previousRate: 25 },
-    { page: '产品详情页', conversionRate: 18, previousRate: 16 },
-    { page: '购物车页', conversionRate: 15, previousRate: 13 },
-    { page: '结算页', conversionRate: 12, previousRate: 10 },
-  ].map(item => ({
-    ...item,
-    change: ((item.conversionRate / item.previousRate) - 1) * 100
-  }));
+    // Process real data
+    const currentData = conversionTrendData.current.daily_data.map(item => ({
+      x: new Date(item.date),
+      y: item.conversion_rate
+    }));
+
+    const previousData = conversionTrendData.previous.daily_data.map(item => ({
+      x: new Date(item.date),
+      y: item.conversion_rate
+    }));
+
+    return [
+      {
+        id: "当前转化率",
+        data: currentData
+      },
+      {
+        id: "对比期转化率",
+        data: previousData
+      }
+    ];
+  };
+
+  const conversionRateTrendData = processConversionTrendData();
+
 
   // Create conversion by source data
   const conversionBySourceData = [
@@ -286,49 +468,11 @@ export default function ConversionPage() {
     conversionRate: (item.conversions / item.visits) * 100
   }));
 
-  // Create user flow data for Sankey diagram
-  const userFlowData = {
-    nodes: [
-      { id: 'HomePage', label: '首页' },
-      { id: 'ProductList', label: '产品列表' },
-      { id: 'ProductDetail', label: '产品详情' },
-      { id: 'Cart', label: '购物车' },
-      { id: 'Checkout', label: '结算页' },
-      { id: 'Payment', label: '支付页' },
-      { id: 'Exit1', label: '离开' },
-      { id: 'Exit2', label: '离开' },
-      { id: 'Exit3', label: '离开' },
-      { id: 'Exit4', label: '离开' },
-      { id: 'Exit5', label: '离开' },
-    ],
-    links: [
-      // From HomePage
-      { source: 'HomePage', target: 'ProductList', value: Math.round(dashboardData.totalDAU * 0.45) },
-      { source: 'HomePage', target: 'ProductDetail', value: Math.round(dashboardData.totalDAU * 0.15) },
-      { source: 'HomePage', target: 'Exit1', value: Math.round(dashboardData.totalDAU * 0.40) },
-      
-      // From ProductList
-      { source: 'ProductList', target: 'ProductDetail', value: Math.round(dashboardData.totalDAU * 0.30) },
-      { source: 'ProductList', target: 'Exit2', value: Math.round(dashboardData.totalDAU * 0.15) },
-      
-      // From ProductDetail
-      { source: 'ProductDetail', target: 'Cart', value: Math.round(dashboardData.totalDAU * 0.25) },
-      { source: 'ProductDetail', target: 'Exit3', value: Math.round(dashboardData.totalDAU * 0.20) },
-      
-      // From Cart
-      { source: 'Cart', target: 'Checkout', value: Math.round(dashboardData.totalDAU * 0.20) },
-      { source: 'Cart', target: 'Exit4', value: Math.round(dashboardData.totalDAU * 0.05) },
-      
-      // From Checkout
-      { source: 'Checkout', target: 'Payment', value: Math.round(dashboardData.totalDAU * 0.15) },
-      { source: 'Checkout', target: 'Exit5', value: Math.round(dashboardData.totalDAU * 0.05) },
-    ]
-  };
 
   return (
     <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">转化数据</h1>
+        <h1 className="text-2xl font-bold">{'转化数据'}</h1>
         <DateTimeSelector 
           onDateRangeChange={handleDateRangeChange}
           defaultRange="today"
@@ -346,7 +490,7 @@ export default function ConversionPage() {
         {getFunnelCardsData().map((cardData, index) => (
           <Card key={index}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{cardData.title} ({dashboardData.currentLabel})</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">{cardData.title}</CardTitle>
               <CardDescription className="text-2xl font-bold text-foreground flex items-center">
                 {cardData.rate.toFixed(1)}%
                 {isFinite(cardData.change) && (
@@ -366,7 +510,7 @@ export default function ConversionPage() {
         {/* 1. Conversion Funnel */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">转化漏斗 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">转化漏斗</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             <ResponsiveFunnel
@@ -388,7 +532,7 @@ export default function ConversionPage() {
               isInteractive={true}
               tooltip={({ part }) => {
                 // 查找对应的原始数据以显示用户数
-                const stepData = funnelData.current.funnel_steps.find(
+                const stepData = funnelData?.current?.funnel_steps?.find(
                   step => step.step.replace(/^\d+\./, '') === part.data.id
                 );
                 return (
@@ -397,199 +541,16 @@ export default function ConversionPage() {
                     转化率: {part.data.value}%<br/>
                     用户数: {stepData?.users.toLocaleString() || 0}
                   </div>
-                )}
-              }
+                )
+              }}
             />
           </CardContent>
         </Card>
 
-        {/* 2. Conversion Rate Trend */}
+        {/* 2. Conversion by Source */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">转化率趋势 ({dashboardData.currentLabel})</CardTitle>
-          </CardHeader>
-          <CardContent className="h-80">
-            <ResponsiveLine
-              key={`conversion-line-${dashboardData.timeGranularity}`}
-              {...dashboardData.commonLineProps}
-              data={conversionRateTrendData}
-              colors={['#6366f1', '#a5b4fc']} // Current, Comparison
-              lineWidth={2}
-              enablePoints={dashboardData.timeGranularity !== 'monthly'}
-              pointSize={dashboardData.timeGranularity === 'hourly' ? 6 : 4}
-              pointBorderWidth={2}
-              pointBorderColor={{ from: 'serieColor' }}
-              pointLabelYOffset={-12}
-              useMesh={true}
-              enableGridX={false}
-              enableGridY={true}
-              xScale={conversionXScale}
-              xFormat={dashboardData.timeGranularity === 'hourly' ? undefined :
-                      "time:%Y-%m-%d"
-              }
-              yScale={{ type: 'linear', min: 0, max: 25 }}
-              axisBottom={{
-                ...conversionAxisBottom,
-              }}
-              axisLeft={{
-                ...dashboardData.commonLineProps.axisLeft,
-                format: v => `${v}%`,
-              }}
-              tooltip={({ point }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  {point.data.yFormatted}%
-                </div>
-              )}
-              legends={[
-                {
-                  anchor: 'top-right',
-                  direction: 'column',
-                  justify: false,
-                  translateX: 0,
-                  translateY: 0,
-                  itemsSpacing: 0,
-                  itemDirection: 'left-to-right',
-                  itemWidth: 80,
-                  itemHeight: 20,
-                  itemOpacity: 0.75,
-                  symbolSize: 12,
-                  symbolShape: 'circle',
-                  symbolBorderColor: 'rgba(0, 0, 0, .5)',
-                  effects: [
-                    {
-                      on: 'hover',
-                      style: {
-                        itemBackground: 'rgba(0, 0, 0, .03)',
-                        itemOpacity: 1
-                      }
-                    }
-                  ]
-                }
-              ]}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 3. User Conversion Path (Sankey Diagram) */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">用户转化路径 ({dashboardData.currentLabel})</CardTitle>
-          </CardHeader>
-          <CardContent className="h-96">
-            <ResponsiveSankey
-              data={userFlowData}
-              margin={{ top: 40, right: 40, bottom: 40, left: 40 }}
-              align="justify"
-              colors={{ scheme: 'category10' }}
-              nodeOpacity={1}
-              nodeHoverOpacity={1}
-              nodeThickness={18}
-              nodeSpacing={24}
-              nodeBorderWidth={0}
-              nodeBorderColor={{
-                from: 'color',
-                modifiers: [['darker', 0.8]]
-              }}
-              linkOpacity={0.5}
-              linkHoverOpacity={0.8}
-              linkHoverOthersOpacity={0.1}
-              linkContract={3}
-              enableLinkGradient={true}
-              labelPosition="outside"
-              labelOrientation="horizontal"
-              labelPadding={16}
-              labelTextColor={{
-                from: 'color',
-                modifiers: [['darker', 1]]
-              }}
-              tooltip={({ node }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{node.label}</strong>: {node.value} 用户
-                </div>
-              )}
-              nodeTooltip={({ node }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{node.label}</strong>: {node.value} 用户
-                </div>
-              )}
-              linkTooltip={({ link }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{link.source.label}</strong> → <strong>{link.target.label}</strong>: {link.value} 用户
-                </div>
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 4. Page Conversion Rates */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">各页面转化率 ({dashboardData.currentLabel})</CardTitle>
-          </CardHeader>
-          <CardContent className="h-80">
-            <ResponsiveBar
-              {...dashboardData.commonBarProps}
-              data={pageConversionRatesData}
-              keys={['conversionRate', 'previousRate']}
-              indexBy="page"
-              margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-              padding={0.3}
-              defs={dashboardData.gradientDefs}
-              fill={[
-                { match: { id: 'conversionRate' }, id: 'gradientCurrent' },
-                { match: { id: 'previousRate' }, id: 'gradientComparison' }
-              ]}
-              axisBottom={{
-                tickSize: 5,
-                tickPadding: 5,
-                tickRotation: -45,
-              }}
-              axisLeft={{
-                tickSize: 5,
-                tickPadding: 5,
-                tickRotation: 0,
-                format: v => `${v}%`,
-              }}
-              enableLabel={true}
-              labelFormat={value => `${value}%`}
-              legends={[
-                {
-                  dataFrom: 'keys',
-                  anchor: 'top-right',
-                  direction: 'column',
-                  justify: false,
-                  translateX: 0,
-                  translateY: 0,
-                  itemsSpacing: 2,
-                  itemWidth: 100,
-                  itemHeight: 20,
-                  itemDirection: 'left-to-right',
-                  itemOpacity: 0.85,
-                  symbolSize: 20,
-                  effects: [
-                    {
-                      on: 'hover',
-                      style: {
-                        itemOpacity: 1
-                      }
-                    }
-                  ]
-                }
-              ]}
-              tooltip={({ id, value, indexValue }) => (
-                <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                  <strong>{indexValue}</strong><br />
-                  {id === 'conversionRate' ? '当前' : '对比期'}: {value}%
-                </div>
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 5. Conversion by Source */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">各来源转化率 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">各来源转化率</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             <div className="overflow-x-auto">
@@ -627,7 +588,269 @@ export default function ConversionPage() {
           </CardContent>
         </Card>
 
+        {/* 3. Conversion Rate Trend - Expanded */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              转化率趋势
+              {conversionTrendData && (
+                <span className="ml-2 text-xs text-gray-500">
+                  平均转化率: {conversionTrendData.current.summary.avg_conversion_rate.toFixed(2)}%
+                  <span className={`ml-2 ${conversionTrendData.comparison.avg_conversion_rate_change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {conversionTrendData.comparison.avg_conversion_rate_change >= 0 ? '+' : ''}{conversionTrendData.comparison.avg_conversion_rate_change.toFixed(2)}%
+                  </span>
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-96">
+            {/* 检查是否只有一天的数据 */}
+            {conversionTrendData && conversionTrendData.current.daily_data.length === 1 ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="text-6xl font-bold text-indigo-600 mb-4">
+                  {conversionTrendData.current.daily_data[0].conversion_rate.toFixed(2)}%
+                </div>
+                <div className="text-xl text-gray-600 mb-2">
+                  今日转化率
+                </div>
+                <div className="flex items-center gap-4 text-sm text-gray-500">
+                  <div>
+                    浏览用户: {conversionTrendData.current.daily_data[0].viewed_users.toLocaleString()}
+                  </div>
+                  <div>
+                    购买用户: {conversionTrendData.current.daily_data[0].purchased_users.toLocaleString()}
+                  </div>
+                </div>
+                {conversionTrendData.comparison && conversionTrendData.comparison.avg_conversion_rate_change !== 0 && (
+                  <div className={`mt-4 text-lg font-medium ${
+                    conversionTrendData.comparison.avg_conversion_rate_change >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {conversionTrendData.comparison.avg_conversion_rate_change >= 0 ? '↑' : '↓'} 
+                    {' '}{Math.abs(conversionTrendData.comparison.avg_conversion_rate_change).toFixed(2)}%
+                    <span className="text-sm text-gray-500 ml-2">环比</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <ResponsiveLine
+                key={`conversion-line-${dashboardData.timeGranularity}`}
+                {...dashboardData.commonLineProps}
+                data={conversionRateTrendData}
+                colors={['#6366f1', '#a5b4fc']} // Current, Comparison
+                lineWidth={2}
+                enablePoints={dashboardData.timeGranularity !== 'monthly'}
+                pointSize={dashboardData.timeGranularity === 'hourly' ? 6 : 4}
+                pointBorderWidth={2}
+                pointBorderColor={{ from: 'serieColor' }}
+                pointLabelYOffset={-12}
+                useMesh={true}
+                enableGridX={false}
+                enableGridY={true}
+                xScale={conversionXScale}
+                xFormat={dashboardData.timeGranularity === 'hourly' ? undefined :
+                        "time:%Y-%m-%d"
+                }
+                yScale={{ 
+                  type: 'linear', 
+                  min: 0, 
+                  max: conversionTrendData 
+                    ? Math.max(
+                        ...conversionTrendData.current.daily_data.map(d => d.conversion_rate),
+                        ...conversionTrendData.previous.daily_data.map(d => d.conversion_rate)
+                      ) * 1.2 
+                    : 25 
+                }}
+                axisBottom={{
+                  ...conversionAxisBottom,
+                }}
+                axisLeft={{
+                  ...dashboardData.commonLineProps.axisLeft,
+                  format: v => `${v}%`,
+                }}
+                tooltip={({ point }) => {
+                  const dateStr = point.data.x instanceof Date 
+                    ? point.data.x.toLocaleDateString('zh-CN')
+                    : String(point.data.x);
+                  const value = typeof point.data.y === 'number' ? point.data.y.toFixed(2) : '0';
+                  
+                  return (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{point.serieId}</strong><br/>
+                      日期: {dateStr}<br/>
+                      转化率: {value}%
+                    </div>
+                  );
+                }}
+                legends={[
+                  {
+                    anchor: 'top-right',
+                    direction: 'column',
+                    justify: false,
+                    translateX: 0,
+                    translateY: 0,
+                    itemsSpacing: 0,
+                    itemDirection: 'left-to-right',
+                    itemWidth: 80,
+                    itemHeight: 20,
+                    itemOpacity: 0.75,
+                    symbolSize: 12,
+                    symbolShape: 'circle',
+                    symbolBorderColor: 'rgba(0, 0, 0, .5)',
+                    effects: [
+                      {
+                        on: 'hover',
+                        style: {
+                          itemBackground: 'rgba(0, 0, 0, .03)',
+                          itemOpacity: 1
+                        }
+                      }
+                    ]
+                  }
+                ]}
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 4. Product Conversion Rates */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              产品转化率排行
+              {productConversionData && (
+                <span className="ml-2 text-xs text-gray-500">
+                  平均转化率: {productConversionData.summary.avg_conversion_rate.toFixed(1)}%
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left pb-2 pr-4">排名</th>
+                    <th className="text-left pb-2 pr-2">图片</th>
+                    <th className="text-left pb-2">产品名称</th>
+                    <th className="text-right pb-2 pr-4">浏览量</th>
+                    <th className="text-right pb-2 pr-4">购买量</th>
+                    <th className="text-right pb-2 pr-4">转化率</th>
+                    <th className="text-right pb-2">环比变化</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productConversionData?.data.map((product, index) => {
+                    // 查找对应的对比数据
+                    const comparisonItem = productComparisonData?.find(
+                      item => item.product_id === product.product_id
+                    );
+                    return (
+                      <tr key={product.product_id} className="border-b last:border-0 hover:bg-gray-50">
+                        <td className="py-3 pr-4">
+                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-medium ${
+                            product.rank <= 3 ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {product.rank}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-2">
+                          {comparisonItem?.sku_image && (
+                            <img 
+                              src={comparisonItem.sku_image} 
+                              alt={product.product_name}
+                              className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => setPreviewImage({url: comparisonItem.sku_image, name: product.product_name})}
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.src = '/placeholder.png';
+                              }}
+                            />
+                          )}
+                        </td>
+                        <td className="py-3">
+                          <div className="max-w-xs truncate" title={product.product_name}>
+                            {product.product_name}
+                          </div>
+                          <div className="text-xs text-gray-500">ID: {product.product_id}</div>
+                        </td>
+                        <td className="py-3 text-right pr-4">{product.viewed_users.toLocaleString()}</td>
+                        <td className="py-3 text-right pr-4">{product.purchased_users.toLocaleString()}</td>
+                        <td className="py-3 text-right pr-4">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="font-medium">{product.conversion_rate.toFixed(1)}%</span>
+                            <div className="h-2 w-20 bg-gray-200 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-indigo-500 rounded-full transition-all" 
+                                style={{ width: `${Math.min(product.conversion_rate, 100)}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 text-right">
+                          {comparisonItem && (
+                            <div className="flex items-center justify-end gap-2">
+                              <span className={`text-sm font-medium ${
+                                comparisonItem.rate_change >= 0 ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {comparisonItem.rate_change >= 0 ? '+' : ''}{comparisonItem.rate_change.toFixed(1)}%
+                              </span>
+                              {comparisonItem.rate_change !== 0 && (
+                                <span className={`text-xs ${
+                                  comparisonItem.rate_change >= 0 ? 'text-green-600' : 'text-red-600'
+                                }`}>
+                                  {comparisonItem.rate_change >= 0 ? '↑' : '↓'}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {!comparisonItem && <span className="text-gray-400 text-sm">--</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {(!productConversionData || productConversionData.data.length === 0) && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-gray-500">
+                        暂无产品转化率数据
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {productConversionData && productConversionData.summary && (
+                <div className="mt-4 pt-4 border-t flex justify-between text-sm text-gray-600">
+                  <div>总产品数: {productConversionData.summary.total_products}</div>
+                  <div>总浏览用户: {productConversionData.summary.total_viewed_users.toLocaleString()}</div>
+                  <div>总购买用户: {productConversionData.summary.total_purchased_users.toLocaleString()}</div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
       </div>
+
+      {/* 图片预览模态框 */}
+      <Dialog open={!!previewImage} onOpenChange={(open) => !open && setPreviewImage(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewImage?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center items-center p-4">
+            {previewImage && (
+              <img 
+                src={previewImage.url} 
+                alt={previewImage.name}
+                className="max-w-full max-h-[70vh] object-contain"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = '/placeholder.png';
+                }}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

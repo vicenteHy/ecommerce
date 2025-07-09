@@ -548,7 +548,7 @@ export default function ProductsPage() {
       <div className="grid gap-4 md:grid-cols-3 mb-6">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">总销售量（商品）({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">总销售量（商品）</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {productData && productData.totalSales !== undefined ? (
                 <>
@@ -570,7 +570,7 @@ export default function ProductsPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">总加购量（商品）({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">总加购量（商品）</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {productData && productData.totalCartQuantity !== undefined ? (
                 <>
@@ -592,7 +592,7 @@ export default function ProductsPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">总浏览量（商品）({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">总浏览量（商品）</CardTitle>
             <CardDescription className="text-2xl font-bold text-foreground flex items-center">
               {categoryViewData && categoryViewData.current ? (
                 <>
@@ -623,92 +623,115 @@ export default function ProductsPage() {
         {/* 2. 销量趋势 */}
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">商品销量趋势 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">商品销量趋势</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             {productData && productData.lineChartSalesData && productData.lineChartSalesData.length > 0 ? (
-              <ResponsiveLine
-                key={`sales-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
-                {...dashboardData.commonLineProps}
-                data={productData.lineChartSalesData}
-                colors={['#10b981', '#ef4444']} // 当前时段用绿色，对比时段用红色
-                lineWidth={2}
-                enablePoints={true}
-                pointSize={4}
-                pointBorderWidth={2}
-                pointBorderColor={{ from: 'serieColor' }}
-                pointLabelYOffset={-12}
-                useMesh={true}
-                enableGridX={false}
-                enableGridY={true}
-                xScale={{ 
-                  type: 'time',
-                  precision: 'day'
-                }}
-                xFormat="time:%Y-%m-%d"
-                yScale={{ 
-                  type: 'linear', 
-                  min: 0, 
-                  max: calculateYMax(Math.max(...productData.lineChartSalesData
-                    .flatMap(series => series.data
-                      .map(point => typeof point.y === 'number' ? point.y : 0)
-                    ))) 
-                }}
-                axisBottom={{
-                  tickSize: 0,
-                  tickPadding: 10,
-                  tickRotation: 0,
-                  format: '%m/%d', // 简化日期显示
-                }}
-                axisLeft={{
-                  ...dashboardData.commonLineProps.axisLeft,
-                  format: (v) => {
-                    if (typeof v !== 'number') return String(v);
-                    if (v >= 10000) {
-                      const valueInWan = v / 10000;
-                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
-                      return `${formattedValue}万`;
-                    } else if (v >= 1000) {
-                      const valueInQian = v / 1000;
-                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
-                      return `${formattedValue}千`;
-                    }
-                    return String(v);
-                  },
-                }}
-                legends={[
-                  {
-                    anchor: 'top-right',
-                    direction: 'row',
-                    justify: false,
-                    translateX: 0,
-                    translateY: -30,
-                    itemsSpacing: 5,
-                    itemDirection: 'left-to-right',
-                    itemWidth: 80,
-                    itemHeight: 20,
-                    itemOpacity: 0.75,
-                    symbolSize: 12,
-                    symbolShape: 'circle',
-                    symbolBorderColor: 'rgba(0, 0, 0, .5)',
-                    effects: [
-                      {
-                        on: 'hover',
-                        style: {
-                          itemBackground: 'rgba(0, 0, 0, .03)',
-                          itemOpacity: 1
-                        }
-                      }
-                    ]
-                  }
-                ]}
-                tooltip={({ point }) => (
-                  <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{point.serieId}</strong><br/>
-                    <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'} 件销售
+              (dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) < 86400000 && 
+               productData.lineChartSalesData[0]?.data.length === 1) ? (
+                // 单天数据显示为大数字
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="text-6xl font-bold text-black mb-4">
+                    {productData.totalSales.toLocaleString()}
                   </div>
-                )}
-              />
+                  <div className="text-xl text-gray-600 mb-2">
+                    今日商品销售量
+                  </div>
+                  {isFinite(productData.salesChange) && (
+                    <div className={`mt-4 text-lg font-medium ${
+                      productData.salesChange >= 0 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {productData.salesChange >= 0 ? '↑' : '↓'} 
+                      {' '}{Math.abs(productData.salesChange).toFixed(1)}%
+                      <span className="text-sm text-gray-500 ml-2">环比</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                // 多天数据显示折线图
+                <ResponsiveLine
+                  key={`sales-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
+                  {...dashboardData.commonLineProps}
+                  data={productData.lineChartSalesData}
+                  colors={['#10b981', '#ef4444']} // 当前时段用绿色，对比时段用红色
+                  lineWidth={2}
+                  enablePoints={true}
+                  pointSize={4}
+                  pointBorderWidth={2}
+                  pointBorderColor={{ from: 'serieColor' }}
+                  pointLabelYOffset={-12}
+                  useMesh={true}
+                  enableGridX={false}
+                  enableGridY={true}
+                  xScale={{ 
+                    type: 'time',
+                    precision: 'day'
+                  }}
+                  xFormat="time:%Y-%m-%d"
+                  yScale={{ 
+                    type: 'linear', 
+                    min: 0, 
+                    max: calculateYMax(Math.max(...productData.lineChartSalesData
+                      .flatMap(series => series.data
+                        .map(point => typeof point.y === 'number' ? point.y : 0)
+                      ))) 
+                  }}
+                  axisBottom={{
+                    tickSize: 0,
+                    tickPadding: 10,
+                    tickRotation: 0,
+                    format: '%m/%d', // 简化日期显示
+                  }}
+                  axisLeft={{
+                    ...dashboardData.commonLineProps.axisLeft,
+                    format: (v) => {
+                      if (typeof v !== 'number') return String(v);
+                      if (v >= 10000) {
+                        const valueInWan = v / 10000;
+                        const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
+                        return `${formattedValue}万`;
+                      } else if (v >= 1000) {
+                        const valueInQian = v / 1000;
+                        const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
+                        return `${formattedValue}千`;
+                      }
+                      return String(v);
+                    },
+                  }}
+                  legends={[
+                    {
+                      anchor: 'top-right',
+                      direction: 'row',
+                      justify: false,
+                      translateX: 0,
+                      translateY: -30,
+                      itemsSpacing: 5,
+                      itemDirection: 'left-to-right',
+                      itemWidth: 80,
+                      itemHeight: 20,
+                      itemOpacity: 0.75,
+                      symbolSize: 12,
+                      symbolShape: 'circle',
+                      symbolBorderColor: 'rgba(0, 0, 0, .5)',
+                      effects: [
+                        {
+                          on: 'hover',
+                          style: {
+                            itemBackground: 'rgba(0, 0, 0, .03)',
+                            itemOpacity: 1
+                          }
+                        }
+                      ]
+                    }
+                  ]}
+                  tooltip={({ point }) => (
+                    <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
+                      <strong>{point.serieId}</strong><br/>
+                      <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'} 件销售
+                    </div>
+                  )}
+                />
+              )
             ) : (
               <div className="flex justify-center items-center h-full">
                 <span>加载销量数据中...</span>
@@ -720,7 +743,7 @@ export default function ProductsPage() {
         {/* 3. 按类别销售量 */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">类别销量 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">类别销量</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             {productData && productData.categorySalesBarData && productData.categorySalesBarData.length > 0 ? (
@@ -813,7 +836,7 @@ export default function ProductsPage() {
         {/* 4. 按类别浏览量 */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">类别浏览量 ({dashboardData.currentLabel})</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">类别浏览量</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             {productData && productData.categoryViewBarData && productData.categoryViewBarData.length > 0 ? (
@@ -900,7 +923,7 @@ export default function ProductsPage() {
         <Card className="md:col-span-2">
           <CardHeader>
             <div className="flex justify-between items-center">
-              <CardTitle className="text-sm font-medium text-muted-foreground">热销商品排名 ({dashboardData.currentLabel})</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">热销商品排名</CardTitle>
               <div className="flex gap-2">
                 <select 
                   value={bestsellersSort}
