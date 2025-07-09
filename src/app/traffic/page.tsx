@@ -328,25 +328,11 @@ export default function TrafficPage() {
   // 获取后端注册数据
   const fetchRegistrationData = async (from: Date, to: Date) => {
     try {
-      const formatDateTime = (date: Date): string => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day} 00:00:00`;
-      };
-      
-      const formatDateTimeWithHour = (date: Date): string => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day} 23:59:59`;
-      };
-      
       // 并行获取对比数据和每日数据
       const [comparisonResponse, dailyResponse] = await Promise.all([
         // 获取对比数据
         fetch(
-          `http://localhost:8000/registration/comparison?current_start_date=${formatDateTime(from)}&current_end_date=${formatDateTime(to)}`,
+          `http://localhost:8000/registration/comparison?current_start_date=${formatDate(from)}&current_end_date=${formatDate(to)}`,
           {
             method: 'GET',
             headers: {
@@ -358,7 +344,7 @@ export default function TrafficPage() {
         ),
         // 获取每日数据
         fetch(
-          `http://localhost:8000/registration/daily?start_date=${formatDateTime(from)}&end_date=${formatDateTimeWithHour(to)}`,
+          `http://localhost:8000/registration/daily?start_date=${formatDate(from)}&end_date=${formatDate(to)}`,
           {
             method: 'GET',
             headers: {
@@ -396,7 +382,7 @@ export default function TrafficPage() {
             
             try {
               const previousDailyResponse = await fetch(
-                `http://localhost:8000/registration/daily?start_date=${formatDateTime(previousStartDate)}&end_date=${formatDateTimeWithHour(previousEndDate)}`,
+                `http://localhost:8000/registration/daily?start_date=${formatDate(previousStartDate)}&end_date=${formatDate(previousEndDate)}`,
                 {
                   method: 'GET',
                   headers: {

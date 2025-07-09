@@ -5,8 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DateTimeSelector } from "@/components/date-time-selector";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ResponsiveLine } from "@nivo/line";
-import { Search, TrendingUp, Users, ShoppingCart } from "lucide-react";
-import { SearchMetrics, SearchTermData, SearchClickPosition, SearchBehavior, SearchSource, SearchDevice } from "@/lib/dashboard-data";
+import { Search, Users } from "lucide-react";
+import { SearchMetrics } from "@/lib/dashboard-data";
 
 interface DailySearchData {
   date: string;
@@ -46,15 +46,30 @@ interface SearchCountComparison {
   };
 }
 
+interface SearchKeyword {
+  rank: number;
+  keyword: string;
+  search_count: number;
+  unique_users: number;
+}
+
+interface SearchKeywordsRanking {
+  keywords: SearchKeyword[];
+  total_keywords: number;
+  start_date: string;
+  end_date: string;
+}
+
 export default function SearchPage() {
   const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   const [searchMetrics, setSearchMetrics] = useState<SearchMetrics | null>(null);
-  const [topSearchTerms, setTopSearchTerms] = useState<SearchTermData[]>([]);
   const [searchTrends, setSearchTrends] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchCountData, setSearchCountData] = useState<SearchCountData | null>(null);
   const [searchComparisonData, setSearchComparisonData] = useState<SearchCountComparison | null>(null);
+  const [searchKeywordsData, setSearchKeywordsData] = useState<SearchKeywordsRanking | null>(null);
+  const [keywordsLimit, setKeywordsLimit] = useState<number>(20);
 
   // 格式化日期为 YYYY-MM-DD 格式
   const formatDate = (date: Date): string => {
@@ -91,80 +106,6 @@ export default function SearchPage() {
     return fromDateOnly.getTime() === toDateOnly.getTime();
   };
 
-  // 根据时间范围生成不同的数据
-  const generateMockData = (timeRange: string) => {
-    // 根据时间范围调整数据规模
-    let dataMultiplier = 1;
-    let trendLength = 24; // 默认24小时
-    
-    switch (timeRange) {
-      case 'last_7_days':
-        dataMultiplier = 7;
-        trendLength = 7; // 7天
-        break;
-      case 'last_30_days':
-        dataMultiplier = 30;
-        trendLength = 30; // 30天
-        break;
-      case 'last_6_months':
-        dataMultiplier = 180;
-        trendLength = 6; // 6个月
-        break;
-    }
-
-    // 使用真实的搜索总量数据，如果没有则使用默认值
-    const totalSearchesCount = searchMetrics?.totalSearches || Math.floor(15000 * dataMultiplier);
-    const baseSearches = totalSearchesCount / dataMultiplier;
-    
-    // 设置模拟的平均搜索深度和转化率
-    if (!searchMetrics?.avgSearchDepth || !searchMetrics?.searchConversionRate) {
-      setSearchMetrics(prev => prev ? ({
-        ...prev,
-        avgSearchDepth: prev.avgSearchDepth || parseFloat((Math.random() * 1.5 + 2.5).toFixed(2)),
-        searchConversionRate: prev.searchConversionRate || parseFloat((Math.random() * 10 + 15).toFixed(2)),
-        change: {
-          ...prev.change,
-          avgSearchDepth: prev.change.avgSearchDepth || parseFloat((Math.random() * 10 - 5).toFixed(2)),
-          searchConversionRate: prev.change.searchConversionRate || parseFloat((Math.random() * 5 - 2).toFixed(2)),
-        },
-      }) : null);
-    }
-
-    // 热门搜索词 - 增加更多搜索词
-    const allSearchTerms = [
-      "iPhone 15", "iPhone 15 Pro", "iPhone 15 Pro Max", "笔记本电脑", "MacBook Air", "MacBook Pro",
-      "无线耳机", "AirPods Pro", "索尼耳机", "智能手表", "Apple Watch", "小米手环",
-      "平板电脑", "iPad Pro", "华为平板", "充电宝", "快充充电器", "无线充电器",
-      "机械键盘", "游戏鼠标", "4K显示器", "手机壳", "钢化膜", "数据线",
-      "蓝牙音箱", "智能音箱", "路由器", "移动硬盘", "U盘", "内存条"
-    ];
-    
-    // 随机选择15个搜索词
-    const selectedTerms = allSearchTerms
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 15);
-    
-    const searchTerms: SearchTermData[] = selectedTerms.map((term, index) => {
-      const termBaseSearches = Math.floor((3000 - index * 150) * dataMultiplier * (0.8 + Math.random() * 0.4));
-      const searches = Math.max(100, termBaseSearches);
-      const clicks = Math.floor(searches * (0.5 + Math.random() * 0.3));
-      const conversions = Math.floor(clicks * (0.1 + Math.random() * 0.2));
-      
-      return {
-        term,
-        searches,
-        clicks,
-        conversions,
-        ctr: parseFloat(((clicks / searches) * 100).toFixed(2)),
-        conversionRate: parseFloat(((conversions / searches) * 100).toFixed(2)),
-      };
-    }).sort((a, b) => b.searches - a.searches);
-
-    // 搜索趋势数据现在由API提供，不再生成模拟数据
-
-    // 只设置模拟数据，不覆盖从API获取的搜索指标
-    setTopSearchTerms(searchTerms);
-  };
 
   // 获取搜索统计数据
   const fetchSearchCount = async (from: Date, to: Date) => {
@@ -182,9 +123,9 @@ export default function SearchPage() {
         setSearchMetrics(prev => ({
           totalSearches: data.summary.total_search_count,
           uniqueSearchUsers: data.summary.total_unique_users,
-          avgSearchDepth: prev?.avgSearchDepth || 3.2,
-          searchConversionRate: prev?.searchConversionRate || 18.5,
-          change: prev?.change || {
+          avgSearchDepth: 3.2,
+          searchConversionRate: 18.5,
+          change: {
             totalSearches: 0,
             uniqueSearchUsers: 0,
             avgSearchDepth: 0,
@@ -215,8 +156,8 @@ export default function SearchPage() {
           change: {
             totalSearches: data.summary.search_count_change_rate,
             uniqueSearchUsers: data.summary.unique_users_change_rate,
-            avgSearchDepth: prev.change.avgSearchDepth,
-            searchConversionRate: prev.change.searchConversionRate,
+            avgSearchDepth: 0,
+            searchConversionRate: 0,
           },
         }) : null);
       }
@@ -277,6 +218,21 @@ export default function SearchPage() {
     }
   };
 
+  // 获取搜索关键词排名数据
+  const fetchSearchKeywords = async (from: Date, to: Date, limit: number = 20) => {
+    try {
+      const url = `http://localhost:8000/search/keywords/ranking?start_date=${formatDate(from)}&end_date=${formatDate(to)}&limit=${limit}`;
+      console.log('获取搜索关键词排名数据 URL:', url);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch search keywords');
+      const data = await response.json();
+      console.log('搜索关键词排名数据:', data);
+      setSearchKeywordsData(data);
+    } catch (err) {
+      console.log('获取搜索关键词排名失败:', err);
+    }
+  };
+
   // 尝试从API获取数据，失败时使用模拟数据
   const fetchSearchData = async (rangeType: string, from: Date, to: Date) => {
     try {
@@ -293,16 +249,14 @@ export default function SearchPage() {
       // 并行请求多个API
       await Promise.all([
         fetchSearchCount(from, to),
-        fetchSearchComparison(from, to)
+        fetchSearchComparison(from, to),
+        fetchSearchKeywords(from, to, keywordsLimit)
       ]);
       
-      // 继续使用模拟数据的其他部分
-      generateMockData(rangeType);
       setError(null);
     } catch (err) {
-      console.log('使用模拟数据:', err);
-      generateMockData(rangeType);
-      setError(null);
+      console.log('获取数据失败:', err);
+      setError('获取数据失败，请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -346,6 +300,13 @@ export default function SearchPage() {
     setLoading(false);
   }, []);
 
+  // 当关键词数量限制改变时，重新获取数据
+  useEffect(() => {
+    if (dateRange.from && dateRange.to) {
+      fetchSearchKeywords(dateRange.from, dateRange.to, keywordsLimit);
+    }
+  }, [keywordsLimit]);
+
   const formatChange = (value: number) => {
     const prefix = value > 0 ? "+" : "";
     return `${prefix}${value.toFixed(1)}%`;
@@ -355,17 +316,6 @@ export default function SearchPage() {
     return value > 0 ? "text-green-600" : "text-red-600";
   };
 
-  // 添加无结果搜索词数据
-  const [noResultTerms, setNoResultTerms] = useState<string[]>([]);
-  
-  useEffect(() => {
-    // 生成无结果搜索词
-    const noResults = [
-      "未上架商品", "停产型号", "错误拼写", "过时产品", "稀有配件",
-      "未知品牌", "特殊规格", "定制产品", "限量版", "概念产品"
-    ].sort(() => Math.random() - 0.5).slice(0, 5);
-    setNoResultTerms(noResults);
-  }, [dateRange]);
 
   return (
     <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
@@ -382,7 +332,7 @@ export default function SearchPage() {
       )}
 
       {/* 核心指标卡片 */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">搜索总量</CardTitle>
@@ -436,36 +386,6 @@ export default function SearchPage() {
                 </p>
               </>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">平均搜索深度</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {searchMetrics?.avgSearchDepth} 页
-            </div>
-            <p className={`text-xs ${getChangeColor(searchMetrics?.change.avgSearchDepth || 0)}`}>
-              {formatChange(searchMetrics?.change.avgSearchDepth || 0)} 较上期
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">搜索转化率</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {searchMetrics?.searchConversionRate}%
-            </div>
-            <p className={`text-xs ${getChangeColor(searchMetrics?.change.searchConversionRate || 0)}`}>
-              {formatChange(searchMetrics?.change.searchConversionRate || 0)} 较上期
-            </p>
           </CardContent>
         </Card>
       </div>
@@ -539,36 +459,6 @@ export default function SearchPage() {
         </CardContent>
       </Card>
 
-      {/* 热门搜索词 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>热门搜索词</CardTitle>
-          <CardDescription>搜索量最高的关键词及其表现</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>搜索词</TableHead>
-                <TableHead className="text-right">搜索量</TableHead>
-                <TableHead className="text-right">点击率</TableHead>
-                <TableHead className="text-right">转化率</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {topSearchTerms.slice(0, 8).map((term) => (
-                <TableRow key={term.term}>
-                  <TableCell className="font-medium">{term.term}</TableCell>
-                  <TableCell className="text-right">{term.searches.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">{term.ctr}%</TableCell>
-                  <TableCell className="text-right">{term.conversionRate}%</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
       {/* 新增：搜索独立用户趋势 */}
       <Card>
         <CardHeader>
@@ -638,29 +528,89 @@ export default function SearchPage() {
         </CardContent>
       </Card>
 
-
-      {/* 新增：无结果搜索词 */}
+      {/* 热门搜索词 */}
       <Card>
         <CardHeader>
-          <CardTitle>无结果搜索词</CardTitle>
-          <CardDescription>用户搜索但没有找到相关商品的关键词</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>热门搜索词</CardTitle>
+              <CardDescription>搜索量最高的关键词排名</CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setKeywordsLimit(20)}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  keywordsLimit === 20 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }`}
+              >
+                20
+              </button>
+              <button
+                onClick={() => setKeywordsLimit(50)}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  keywordsLimit === 50 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }`}
+              >
+                50
+              </button>
+              <button
+                onClick={() => setKeywordsLimit(100)}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  keywordsLimit === 100 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }`}
+              >
+                100
+              </button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {noResultTerms.map((term, index) => (
-              <span
-                key={index}
-                className="px-3 py-1 bg-red-50 text-red-700 rounded-full text-sm"
-              >
-                {term}
-              </span>
-            ))}
-          </div>
-          <p className="text-sm text-muted-foreground mt-4">
-            建议：考虑添加相关商品或优化搜索算法以提供更好的搜索体验
-          </p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16">排名</TableHead>
+                <TableHead>关键词</TableHead>
+                <TableHead className="text-right">搜索次数</TableHead>
+                <TableHead className="text-right">独立用户</TableHead>
+                <TableHead className="text-right">人均搜索</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {searchKeywordsData?.keywords.map((keyword) => (
+                <TableRow key={keyword.keyword}>
+                  <TableCell className="font-medium">#{keyword.rank}</TableCell>
+                  <TableCell>{keyword.keyword}</TableCell>
+                  <TableCell className="text-right">{keyword.search_count.toLocaleString()}</TableCell>
+                  <TableCell className="text-right">{keyword.unique_users.toLocaleString()}</TableCell>
+                  <TableCell className="text-right">
+                    {(keyword.search_count / keyword.unique_users).toFixed(1)}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(!searchKeywordsData || searchKeywordsData.keywords.length === 0) && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    暂无数据
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+          {searchKeywordsData && searchKeywordsData.total_keywords > 0 && (
+            <div className="mt-4 text-sm text-muted-foreground">
+              共有 {searchKeywordsData.total_keywords.toLocaleString()} 个不同的搜索关键词
+            </div>
+          )}
         </CardContent>
       </Card>
+
+
 
     </main>
   );

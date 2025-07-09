@@ -237,6 +237,32 @@ interface ItemsSoldData {
   };
 }
 
+// 定义注册数据接口
+interface DailyRegistrationData {
+  date: string;
+  registrations: number;
+}
+
+interface RegistrationPeriodData {
+  start: string;
+  end: string;
+  total_registrations: number;
+  average_daily: number;
+  daily_data?: DailyRegistrationData[];
+}
+
+interface RegistrationComparisonData {
+  status: string;
+  data: {
+    current_period: RegistrationPeriodData;
+    previous_period: RegistrationPeriodData;
+    comparison: {
+      total_change: number;
+      change_rate: number;
+    };
+  };
+}
+
 // --- Page Component ---
 export default function DataOverviewPage() {
   // 新增销售数据状态
@@ -253,17 +279,19 @@ export default function DataOverviewPage() {
   const [sessionData, setSessionData] = useState<SessionComparisonData | null>(null);
   // 新增商品销量数据状态
   const [itemsSoldData, setItemsSoldData] = useState<ItemsSoldData | null>(null);
+  // 新增注册数据状态
+  const [registrationData, setRegistrationData] = useState<RegistrationComparisonData | null>(null);
   // 新增日期范围状态，用于显示
   const [dateRange, setDateRange] = useState<{from: Date, to: Date}>({from: new Date(), to: new Date()});
   // 新增错误状态
   const [error, setError] = useState<string | null>(null);
 
-  // 格式化日期为 YYYY-MM-DD 格式（UTC时区）
+  // 格式化日期为 YYYY-MM-DD 格式（本地时区）
   const formatDate = (date: Date): string => {
     try {
-      const year = date.getUTCFullYear();
-      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(date.getUTCDate()).padStart(2, '0');
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     } catch (err) {
       console.error('格式化日期错误:', err);
@@ -537,6 +565,102 @@ export default function DataOverviewPage() {
     }
   };
 
+  // 获取后端注册数据
+  const fetchRegistrationData = async (from: Date, to: Date) => {
+    try {
+      // 并行获取对比数据和每日数据
+      const [comparisonResponse, dailyResponse] = await Promise.all([
+        // 获取对比数据
+        fetch(
+          `http://localhost:8000/registration/comparison?current_start_date=${formatDate(from)}&current_end_date=${formatDate(to)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors',
+          }
+        ),
+        // 获取每日数据
+        fetch(
+          `http://localhost:8000/registration/daily?start_date=${formatDate(from)}&end_date=${formatDate(to)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors',
+          }
+        )
+      ]);
+      
+      if (!comparisonResponse.ok) {
+        throw new Error(`对比数据请求失败: ${comparisonResponse.status}`);
+      }
+      
+      const comparisonData = await comparisonResponse.json();
+      console.log('注册对比数据:', comparisonData);
+      
+      // 处理每日数据
+      if (dailyResponse.ok) {
+        const dailyData = await dailyResponse.json();
+        console.log('每日注册数据:', dailyData);
+        
+        if (dailyData && dailyData.status === 'success' && dailyData.data && dailyData.data.daily_data) {
+          // 将每日数据合并到对比数据中
+          if (comparisonData && comparisonData.status === 'success' && comparisonData.data) {
+            comparisonData.data.current_period.daily_data = dailyData.data.daily_data;
+            
+            // 获取对比期的每日数据
+            const days = dailyData.data.daily_data.length;
+            const previousStartDate = new Date(from);
+            previousStartDate.setDate(previousStartDate.getDate() - days);
+            const previousEndDate = new Date(from);
+            previousEndDate.setDate(previousEndDate.getDate() - 1);
+            
+            try {
+              const previousDailyResponse = await fetch(
+                `http://localhost:8000/registration/daily?start_date=${formatDate(previousStartDate)}&end_date=${formatDate(previousEndDate)}`,
+                {
+                  method: 'GET',
+                  headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                  },
+                  mode: 'cors',
+                }
+              );
+              
+              if (previousDailyResponse.ok) {
+                const previousDailyData = await previousDailyResponse.json();
+                if (previousDailyData && previousDailyData.status === 'success' && previousDailyData.data) {
+                  comparisonData.data.previous_period.daily_data = previousDailyData.data.daily_data;
+                }
+              }
+            } catch (err) {
+              console.error('获取对比期每日数据错误:', err);
+            }
+          }
+        }
+      }
+      
+      // 检查数据格式
+      const isValidData = comparisonData && typeof comparisonData === 'object' && 
+                         'status' in comparisonData && comparisonData.status === 'success' && 
+                         'data' in comparisonData;
+      
+      if (isValidData) {
+        setRegistrationData(comparisonData);
+      } else {
+        console.log('注册数据格式不正确');
+      }
+    } catch (err) {
+      console.error('获取注册数据错误:', err);
+    }
+  };
+
   // 获取商品销量数据
   const fetchItemsSoldData = async (from: Date, to: Date) => {
     try {
@@ -735,15 +859,15 @@ export default function DataOverviewPage() {
     });
   };
   
-  // 判断日期范围是否为今天
-  const isToday = () => {
-    const now = new Date();
-    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-    const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
+  // 判断日期范围是否为单日
+  const isSingleDay = () => {
+    if (!dateRange.from || !dateRange.to) return false;
     
-    return dateRange.from && dateRange.to && 
-           dateRange.from.getTime() === todayStart.getTime() && 
-           dateRange.to.getTime() === todayEnd.getTime();
+    // 比较日期，忽略时间部分
+    const fromDateOnly = new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), dateRange.from.getDate());
+    const toDateOnly = new Date(dateRange.to.getFullYear(), dateRange.to.getMonth(), dateRange.to.getDate());
+    
+    return fromDateOnly.getTime() === toDateOnly.getTime();
   };
 
   // 处理日期范围变更的回调函数
@@ -759,6 +883,7 @@ export default function DataOverviewPage() {
     fetchFunnelData(from, to);
     fetchSessionData(from, to);
     fetchItemsSoldData(from, to);
+    fetchRegistrationData(from, to);
   };
 
 
@@ -893,14 +1018,14 @@ export default function DataOverviewPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-             {isToday() && salesData && salesData.current ? (
+             {isSingleDay() && salesData && salesData.current ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <div className="text-4xl font-bold text-foreground mb-2">
                     ¥{salesData.current.total_amount.toLocaleString()}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    今日销售金额
+                    {formatDate(dateRange.from)} 销售金额
                   </div>
                 </div>
               </div>
@@ -1129,14 +1254,14 @@ export default function DataOverviewPage() {
           </CardHeader>
           <CardContent className="h-64">
              {/* 使用真实API数据或降级到模拟数据 */}
-             {isToday() && activeUsersData && activeUsersData.current ? (
+             {isSingleDay() && activeUsersData && activeUsersData.current ? (
                <div className="flex items-center justify-center h-full">
                  <div className="text-center">
                    <div className="text-4xl font-bold text-foreground mb-2">
                      {activeUsersData.current.active_users.toLocaleString()}
                    </div>
                    <div className="text-sm text-muted-foreground">
-                     今日活跃用户
+                     {formatDate(dateRange.from)} 活跃用户
                    </div>
                  </div>
                </div>
@@ -1288,17 +1413,17 @@ export default function DataOverviewPage() {
           </CardContent>
         </Card>
 
-        {/* 6. 平均会话时间 */}
+        {/* 6. 注册人数 */}
         <Card>
           <CardHeader>
-             <CardTitle className="text-sm font-medium text-muted-foreground">平均会话时间</CardTitle>
+             <CardTitle className="text-sm font-medium text-muted-foreground">注册人数</CardTitle>
              <CardDescription className="text-2xl font-bold text-foreground flex items-center">
-               {sessionData && sessionData.current ? (
+               {registrationData && registrationData.data ? (
                  <>
-                   {formatDuration(sessionData.current.avg_session_duration_seconds)}
-                   {sessionData.comparison && isFinite(sessionData.comparison.duration_change_rate) && (
-                     <span className={`ml-2 text-xs font-medium ${sessionData.comparison.duration_change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                       {sessionData.comparison.duration_change_rate >= 0 ? '+' : ''}{sessionData.comparison.duration_change_rate.toFixed(1)}%
+                   {registrationData.data.current_period.total_registrations.toLocaleString()}
+                   {registrationData.data.comparison && isFinite(registrationData.data.comparison.change_rate) && (
+                     <span className={`ml-2 text-xs font-medium ${registrationData.data.comparison.change_rate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                       {registrationData.data.comparison.change_rate >= 0 ? '+' : ''}{registrationData.data.comparison.change_rate.toFixed(1)}%
                        <span className="text-muted-foreground text-xs ml-1">(环比)</span>
                      </span>
                    )}
@@ -1309,64 +1434,85 @@ export default function DataOverviewPage() {
              </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {sessionData && sessionData.current ? (
-              <ResponsiveBar
-                {...commonBarProps}
+            {/* 使用真实API数据 */}
+            {isSingleDay() && registrationData && registrationData.data ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-foreground mb-2">
+                    {registrationData.data.current_period.total_registrations.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {formatDate(dateRange.from)} 注册人数
+                  </div>
+                </div>
+              </div>
+            ) : registrationData && registrationData.data && registrationData.data.current_period.daily_data ? (
+              <ResponsiveLine
+                key={`registration-line-${dateRange.from && dateRange.to && Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) <= 86400000 ? 'hourly' : 'daily'}`}
+                {...commonLineProps}
                 data={[
                   {
-                    metric: '会话数',
-                    current: sessionData.current.session_count,
-                    comparison: sessionData.previous.session_count
-                  },
-                  {
-                    metric: '平均时长(秒)',
-                    current: sessionData.current.avg_session_duration_seconds,
-                    comparison: sessionData.previous.avg_session_duration_seconds
+                    id: 'current',
+                    data: registrationData.data.current_period.daily_data.map(item => ({
+                      x: new Date(item.date),
+                      y: item.registrations
+                    }))
                   }
                 ]}
-                keys={['current', 'comparison']}
-                indexBy="metric"
-                margin={{ top: 10, right: 10, bottom: 50, left: 60 }}
-                padding={0.3}
-                innerPadding={3}
-                groupMode={'grouped'}
-                borderRadius={5}
-                defs={gradientDefs}
-                fill={barFill}
+                colors={['#6366f1']} // 只保留当前数据的颜色
+                lineWidth={2}
+                enablePoints={true}
+                pointSize={4}
+                pointBorderWidth={2}
+                pointBorderColor={{ from: 'serieColor' }}
+                pointLabelYOffset={-12}
+                useMesh={true}
+                enableGridX={false}
+                enableGridY={true}
+                xScale={{ 
+                  type: 'time',
+                  precision: 'day'
+                }}
+                xFormat="time:%Y-%m-%d"
+                yScale={{ 
+                  type: 'linear', 
+                  min: 0, 
+                  max: 'auto'
+                }}
                 axisBottom={{
-                  tickSize: 5,
-                  tickPadding: 5,
+                  tickSize: 0,
+                  tickPadding: 10,
                   tickRotation: 0,
+                  legend: `${formatDate(dateRange.from)} - ${formatDate(dateRange.to)}`,
+                  legendPosition: 'middle',
+                  legendOffset: 20,
+                  format: () => '',  // 不显示各个日期刻度
                 }}
                 axisLeft={{
-                  tickSize: 5,
-                  tickPadding: 5,
-                  tickRotation: 0,
-                  format: (value) => {
-                    if (typeof value !== 'number') return String(value);
-                    if (value >= 1000) {
-                      return `${(value / 1000).toFixed(1)}k`;
+                  ...commonLineProps.axisLeft,
+                  format: (v) => {
+                    if (typeof v !== 'number') return String(v);
+                    if (v >= 10000) {
+                      const valueInWan = v / 10000;
+                      const formattedValue = (v % 10000 === 0) ? valueInWan : valueInWan.toFixed(1);
+                      return `${formattedValue}万`;
+                    } else if (v >= 1000) {
+                      const valueInQian = v / 1000;
+                      const formattedValue = (v % 1000 === 0) ? valueInQian : valueInQian.toFixed(1);
+                      return `${formattedValue}千`;
                     }
-                    return String(Math.round(value));
-                  }
+                    return String(v);
+                  },
                 }}
-                enableLabel={false}
-                enableGridY={true}
-                enableGridX={false}
-                tooltip={({ id, value, indexValue }) => (
+                tooltip={({ point }) => (
                   <div style={{ padding: '6px 10px', background: 'white', border: '1px solid #ccc', fontSize: '12px' }}>
-                    <strong>{indexValue}</strong><br />
-                    {id === 'current' ? '当前' : '对比'}: {
-                      indexValue === '平均时长(秒)' 
-                        ? formatDuration(value) 
-                        : value.toLocaleString()
-                    }
+                    <strong>{format(new Date(point.data.x as Date), 'yyyy-MM-dd')}</strong>: {point.data.y?.toLocaleString() || '0'} 人
                   </div>
                 )}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-400">
-                暂无会话数据
+                暂无注册数据
               </div>
             )}
           </CardContent>
@@ -1393,14 +1539,14 @@ export default function DataOverviewPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
-            {isToday() && itemsSoldData && itemsSoldData.current ? (
+            {isSingleDay() && itemsSoldData && itemsSoldData.current ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <div className="text-4xl font-bold text-foreground mb-2">
                     {itemsSoldData.current.total_items_sold.toLocaleString()}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    今日商品销量
+                    {formatDate(dateRange.from)} 商品销量
                   </div>
                 </div>
               </div>
