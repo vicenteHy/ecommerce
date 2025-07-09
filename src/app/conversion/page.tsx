@@ -407,25 +407,15 @@ export default function ConversionPage() {
   // Process conversion trend data for the chart
   const processConversionTrendData = () => {
     if (!conversionTrendData) {
-      // Fallback to mock data if no real data available
+      // Return empty data if no real data available
       return [
         {
           id: "当前转化率",
-          data: dashboardData.dauChartData[0].data.map(item => ({
-            x: item.x,
-            y: typeof item.y === 'number' 
-              ? (dashboardData.conversionRate + (Math.random() * 2 - 1))
-              : 0
-          }))
+          data: []
         },
         {
           id: "对比期转化率",
-          data: dashboardData.dauChartData[1].data.map(item => ({
-            x: item.x,
-            y: typeof item.y === 'number' 
-              ? (dashboardData.conversionRateYesterday + (Math.random() * 2 - 1))
-              : 0
-          }))
+          data: []
         }
       ];
     }
@@ -604,10 +594,15 @@ export default function ConversionPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="h-96">
-            {/* 检查是否只有一天的数据 */}
-            {conversionTrendData && conversionTrendData.current.daily_data.length === 1 ? (
+            {/* 检查是否有数据 */}
+            {!conversionTrendData || conversionTrendData.current.daily_data.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                <div className="text-lg mb-2">暂无转化率趋势数据</div>
+                <div className="text-sm">请选择日期范围查看数据</div>
+              </div>
+            ) : conversionTrendData.current.daily_data.length === 1 ? (
               <div className="flex flex-col items-center justify-center h-full">
-                <div className="text-6xl font-bold text-indigo-600 mb-4">
+                <div className="text-6xl font-bold text-black mb-4">
                   {conversionTrendData.current.daily_data[0].conversion_rate.toFixed(2)}%
                 </div>
                 <div className="text-xl text-gray-600 mb-2">
